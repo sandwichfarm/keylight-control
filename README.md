@@ -1,6 +1,6 @@
 # Key Light Controller for Linux
 
-A modern, standalone alternative alternative to Elgateps' Control Center fo Key Light devices. Native Linux support for both X11 and Wayland. Does not collect any data or "call home."
+A modern, standalone Linux alternative to Elgato's Control Center for Controlling Key Light devices. Native Linux support for both X11 and Wayland. Does not collect any data or "call home."
 
 ![Keylight Control UI](assets/keylight-control-ui.png)
 
