@@ -46,7 +46,8 @@ That's it! No installation required.
 ### Option 1: Standalone Binary (Easiest)
 ```bash
 # Download from releases page
-wget https://github.com/sandwichfarm/keylight-control/releases/latest/download/keylight-controller
+wget https://github.com/sandwichfarm/keylight-control/releases/latest/download/keylight-controller-linux-x64.tar.gz
+tar -xzf keylight-controller-linux-x64.tar.gz
 chmod +x keylight-controller
 ./keylight-controller
 
@@ -76,7 +77,7 @@ chmod +x keylight_controller.py
 ./keylight_controller.py
 ```
 
-#### Method 2: Using Virtual Environment
+### Option 3: Using Virtual Environment
 ```bash
 # Create virtual environment
 python3 -m venv venv
@@ -89,7 +90,7 @@ pip install -r requirements.txt
 python keylight_controller.py
 ```
 
-#### Method 3: System packages (Distribution-specific)
+### Option 4: System packages (Distribution-specific)
 
 For Arch Linux:
 ```bash
@@ -127,11 +128,11 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ### Launching
 - **From Terminal**: `./keylight_controller.py` or `keylight-controller`
-- **From Desktop**: Search for "Key Light Control" in your application launcher
+- **From Desktop**: Search for "Keylight Control" in your application launcher
 
 ### Controls
 - **Power Button**: Toggle light on/off
-- **Brightness Slider**: Adjust light intensity (0-100%)
+- **Brightness Slider**: Adjust light intensity (1-100%)
 - **Temperature Slider**: Adjust color temperature (2900K-7000K)
 - **System Tray**: Click to show/hide, right-click for menu
 
