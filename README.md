@@ -1,6 +1,6 @@
 # Key Light Controller for Linux
 
-A modern, standalone controller for Key Light devices with native Linux support for both X11 and Wayland. No Python or dependencies required when using the pre-built binary!
+A modern, standalone controller for Elgato's Key Light devices with native Linux support for both X11 and Wayland. No Python or dependencies required when using the pre-built binary!
 
 ![Keylight Control UI](assets/keylight-control-ui.png)
 
