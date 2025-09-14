@@ -29,7 +29,7 @@ A modern, standalone controller for Key Light devices with native Linux support 
 ## Quick Start (Pre-built Binary)
 
 ### Download Latest Release
-1. Go to [Releases](https://github.com/yourusername/keylight-control-python/releases)
+1. Go to [Releases](https://github.com/sandwichfarm/keylight-control-python/releases)
 2. Download `keylight-controller-linux-x64.tar.gz`
 3. Extract and run:
 
@@ -46,7 +46,7 @@ That's it! No installation required.
 ### Option 1: Standalone Binary (Easiest)
 ```bash
 # Download from releases page
-wget https://github.com/yourusername/keylight-control-python/releases/latest/download/keylight-controller
+wget https://github.com/sandwichfarm/keylight-control-python/releases/latest/download/keylight-controller
 chmod +x keylight-controller
 ./keylight-controller
 
@@ -63,7 +63,7 @@ sudo mv keylight-controller /usr/local/bin/
 #### Install Dependencies
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/keylight-control-python.git
+git clone https://github.com/sandwichfarm/keylight-control-python.git
 cd keylight-control-python
 
 # Install dependencies
