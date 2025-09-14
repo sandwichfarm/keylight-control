@@ -2,6 +2,8 @@
 
 A modern, standalone controller for Key Light devices with native Linux support for both X11 and Wayland. No Python or dependencies required when using the pre-built binary!
 
+![Keylight Control UI](assets/keylight-control-ui.png)
+
 ## Features
 
 - 🔍 **Automatic device discovery** via mDNS/Bonjour
