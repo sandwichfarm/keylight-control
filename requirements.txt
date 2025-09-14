@@ -1,0 +1,14 @@
+# Key Light Controller Requirements
+# Python 3.8+ required
+
+# Core GUI framework
+PySide6>=6.4.0
+
+# Async HTTP client for device communication
+aiohttp>=3.8.0
+
+# mDNS/Bonjour service discovery
+zeroconf>=0.47.0
+
+# Async Qt integration
+qasync>=0.24.0

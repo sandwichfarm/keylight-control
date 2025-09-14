@@ -1,0 +1,264 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for release'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build:
+    name: Build Binary
+    runs-on: ubuntu-20.04
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          python3-dev \
+          python3-venv \
+          libgl1-mesa-glx \
+          libglib2.0-0 \
+          libsm6 \
+          libxext6 \
+          libxrender1 \
+          libgomp1 \
+          libglib2.0-0 \
+          libxcb-icccm4 \
+          libxcb-image0 \
+          libxcb-keysyms1 \
+          libxcb-randr0 \
+          libxcb-render-util0 \
+          libxcb-xinerama0 \
+          libxcb-xfixes0
+    
+    - name: Create virtual environment
+      run: python3 -m venv build_env
+    
+    - name: Install Python dependencies
+      run: |
+        source build_env/bin/activate
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Build binary with PyInstaller
+      run: |
+        source build_env/bin/activate
+        pyinstaller keylight_controller.spec --clean --noconfirm
+    
+    - name: Verify binary
+      run: |
+        # Check if binary exists
+        test -f dist/keylight-controller
+        
+        # Check binary size (should be between 50MB and 200MB)
+        SIZE=$(stat -c%s dist/keylight-controller)
+        if [ $SIZE -lt 50000000 ] || [ $SIZE -gt 200000000 ]; then
+          echo "Binary size unexpected: $SIZE bytes"
+          exit 1
+        fi
+        
+        # Make it executable
+        chmod +x dist/keylight-controller
+        
+        # Try to get version (may fail without display)
+        ./dist/keylight-controller --version || true
+    
+    - name: Compress binary
+      run: |
+        cd dist
+        tar -czf keylight-controller-linux-x64.tar.gz keylight-controller
+        sha256sum keylight-controller > keylight-controller.sha256
+        sha256sum keylight-controller-linux-x64.tar.gz > keylight-controller-linux-x64.tar.gz.sha256
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: keylight-controller-binary
+        path: |
+          dist/keylight-controller
+          dist/keylight-controller-linux-x64.tar.gz
+          dist/*.sha256
+        retention-days: 7
+        if-no-files-found: error
+
+  test:
+    name: Test Binary
+    needs: build
+    runs-on: ubuntu-20.04
+    
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: keylight-controller-binary
+        path: dist/
+    
+    - name: Check binary properties
+      run: |
+        cd dist
+        
+        # Make executable
+        chmod +x keylight-controller
+        
+        # Check if it's actually a binary
+        file keylight-controller | grep -q "ELF"
+        
+        # Verify it's statically linked (mostly)
+        ldd keylight-controller | grep -q "not a dynamic executable" || \
+        echo "Binary has some dynamic dependencies (expected for system libs)"
+        
+        # Verify checksums
+        sha256sum -c keylight-controller.sha256
+        sha256sum -c keylight-controller-linux-x64.tar.gz.sha256
+        
+        echo "✅ Binary verification passed"
+
+  release:
+    name: Create Release
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    if: success()
+    
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: keylight-controller-binary
+        path: dist/
+    
+    - name: Extract version from tag
+      id: get_version
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          VERSION=${{ github.event.inputs.tag_name }}
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
+        fi
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "Release version: $VERSION"
+    
+    - name: Read recent commits
+      id: commits
+      run: |
+        # Get commits since last tag
+        PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        if [ -z "$PREV_TAG" ]; then
+          COMMITS=$(git log --pretty=format:"- %s" -10)
+        else
+          COMMITS=$(git log --pretty=format:"- %s" ${PREV_TAG}..HEAD)
+        fi
+        
+        # Escape for GitHub Actions
+        COMMITS="${COMMITS//'%'/'%25'}"
+        COMMITS="${COMMITS//$'\n'/'%0A'}"
+        COMMITS="${COMMITS//$'\r'/'%0D'}"
+        
+        echo "COMMITS<<EOF" >> $GITHUB_OUTPUT
+        echo "$COMMITS" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+    
+    - name: Create Release Notes
+      id: release_notes
+      run: |
+        VERSION=${{ steps.get_version.outputs.VERSION }}
+        
+        cat << EOF > release_notes.md
+        # Key Light Controller ${VERSION}
+        
+        ## 📦 Installation
+        
+        Download the binary below and make it executable:
+        \`\`\`bash
+        # Download and extract
+        tar -xzf keylight-controller-linux-x64.tar.gz
+        chmod +x keylight-controller
+        
+        # Run
+        ./keylight-controller
+        
+        # Optional: Install system-wide
+        sudo mv keylight-controller /usr/local/bin/
+        \`\`\`
+        
+        ## 🎯 Features
+        - 🔍 Automatic device discovery
+        - 🎨 Modern dark theme UI
+        - 💡 Real-time brightness and color control
+        - 🔧 System tray integration
+        - ⚡ Smooth, throttled updates
+        - 🖥️ Native Wayland and X11 support
+        
+        ## 📝 Recent Changes
+        ${{ steps.commits.outputs.COMMITS }}
+        
+        ## 🔒 Checksums
+        Verify your download with the provided .sha256 files.
+        
+        ## 📋 Requirements
+        - Linux x86_64
+        - No Python or dependencies required!
+        
+        ## 🐛 Issues
+        Report issues at: https://github.com/${{ github.repository }}/issues
+        EOF
+        
+        echo "Release notes created"
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.get_version.outputs.VERSION }}
+        name: Key Light Controller ${{ steps.get_version.outputs.VERSION }}
+        body_path: release_notes.md
+        draft: false
+        prerelease: ${{ contains(steps.get_version.outputs.VERSION, 'beta') || contains(steps.get_version.outputs.VERSION, 'alpha') }}
+        files: |
+          dist/keylight-controller
+          dist/keylight-controller-linux-x64.tar.gz
+          dist/*.sha256
+        fail_on_unmatched_files: true
+        generate_release_notes: false
+
+  notify:
+    name: Notify Status
+    needs: [build, test, release]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Check Status
+      run: |
+        if [ "${{ needs.release.result }}" == "success" ]; then
+          echo "✅ Release created successfully!"
+        elif [ "${{ needs.test.result }}" == "failure" ]; then
+          echo "❌ Tests failed - release not created"
+          exit 1
+        elif [ "${{ needs.build.result }}" == "failure" ]; then
+          echo "❌ Build failed - release not created"
+          exit 1
+        else
+          echo "⚠️ Release process had issues"
+          exit 1
+        fi

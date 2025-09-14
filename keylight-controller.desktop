@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Keylight Control
+Comment=Control Key Light devices on your network
+Icon=lightbulb
+Exec=python3 %F/keylight_controller.py
+Path=%k
+Terminal=false
+Categories=Utility;Settings;
+Keywords=keylight;lighting;control;brightness;
+StartupNotify=true

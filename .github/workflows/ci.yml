@@ -1,0 +1,207 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+
+jobs:
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+    
+    - name: Install linting tools
+      run: |
+        pip install flake8 black isort
+    
+    - name: Run flake8
+      run: |
+        # Stop build if there are Python syntax errors or undefined names
+        flake8 keylight_controller.py --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Check for complexity issues
+        flake8 keylight_controller.py --count --max-complexity=10 --max-line-length=127 --statistics || true
+    
+    - name: Check formatting with black
+      run: |
+        black --check keylight_controller.py --line-length=127 || true
+    
+    - name: Check import order
+      run: |
+        isort --check-only keylight_controller.py || true
+
+  test-build:
+    name: Test Build
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          python3-dev \
+          python3-venv \
+          libgl1-mesa-glx \
+          libglib2.0-0
+    
+    - name: Test imports
+      run: |
+        python3 -c "import sys; print(f'Python {sys.version}')"
+        
+    - name: Create virtual environment
+      run: python3 -m venv test_env
+    
+    - name: Install dependencies
+      run: |
+        source test_env/bin/activate
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Check syntax
+      run: |
+        source test_env/bin/activate
+        python -m py_compile keylight_controller.py
+        
+    - name: Run basic import test
+      run: |
+        source test_env/bin/activate
+        python -c "
+        import sys
+        sys.path.insert(0, '.')
+        # This will fail if there are syntax errors or missing imports
+        import keylight_controller
+        print('✅ Import successful')
+        "
+
+  build-binary:
+    name: Build Binary
+    needs: [lint, test-build]
+    runs-on: ubuntu-20.04
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          python3-dev \
+          python3-venv \
+          libgl1-mesa-glx \
+          libglib2.0-0 \
+          libxcb-icccm4 \
+          libxcb-image0 \
+          libxcb-keysyms1 \
+          libxcb-randr0 \
+          libxcb-render-util0 \
+          libxcb-xinerama0 \
+          libxcb-xfixes0
+    
+    - name: Build with PyInstaller
+      run: |
+        python3 -m venv build_env
+        source build_env/bin/activate
+        pip install --upgrade pip
+        pip install -r requirements.txt pyinstaller
+        pyinstaller keylight_controller.spec --clean --noconfirm
+    
+    - name: Verify binary
+      run: |
+        test -f dist/keylight-controller
+        chmod +x dist/keylight-controller
+        
+        # Check size is reasonable
+        SIZE=$(stat -c%s dist/keylight-controller)
+        echo "Binary size: $SIZE bytes"
+        
+        if [ $SIZE -lt 50000000 ]; then
+          echo "❌ Binary too small, build may have failed"
+          exit 1
+        fi
+        
+        if [ $SIZE -gt 200000000 ]; then
+          echo "⚠️ Binary very large, may need optimization"
+        fi
+        
+        echo "✅ Binary build successful"
+    
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: keylight-controller-ci-${{ github.sha }}
+        path: dist/keylight-controller
+        retention-days: 1
+
+  security-check:
+    name: Security Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Run security checks
+      run: |
+        # Check for hardcoded secrets
+        grep -r "api_key\|secret\|password\|token" keylight_controller.py && \
+        echo "⚠️ Possible secrets found" || echo "✅ No obvious secrets"
+        
+        # Check for unsafe operations
+        grep -r "eval\|exec\|__import__" keylight_controller.py && \
+        echo "⚠️ Potentially unsafe operations found" || echo "✅ No unsafe operations"
+
+  summary:
+    name: CI Summary
+    needs: [lint, test-build, build-binary, security-check]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Summary
+      run: |
+        echo "## CI Summary"
+        echo "Lint: ${{ needs.lint.result }}"
+        echo "Test Build: ${{ needs.test-build.result }}"
+        echo "Binary Build: ${{ needs.build-binary.result }}"
+        echo "Security: ${{ needs.security-check.result }}"
+        
+        if [ "${{ needs.build-binary.result }}" != "success" ]; then
+          echo "❌ CI Failed"
+          exit 1
+        fi
+        
+        echo "✅ CI Passed"
