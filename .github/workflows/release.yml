@@ -185,7 +185,7 @@ jobs:
         VERSION=${{ steps.get_version.outputs.VERSION }}
         
         cat << EOF > release_notes.md
-        # Key Light Controller ${VERSION}
+        # ${VERSION}
         
         ## 📦 Installation
         
@@ -230,7 +230,7 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.get_version.outputs.VERSION }}
-        name: Key Light Controller ${{ steps.get_version.outputs.VERSION }}
+        name: ${{ steps.get_version.outputs.VERSION }}
         body_path: release_notes.md
         draft: false
         prerelease: ${{ contains(steps.get_version.outputs.VERSION, 'beta') || contains(steps.get_version.outputs.VERSION, 'alpha') }}
