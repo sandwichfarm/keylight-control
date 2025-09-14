@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+
+# Virtual Environments
+venv/
+ENV/
+env/
+build_env/
+.venv/
+.ENV/
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+*.manifest
+*.pkg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+*.log
+
+# Local configuration
+config.local.json
+settings.local.json
+*.local
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+*.old
+.cache/
+
+# System files
+Thumbs.db
+.directory
+
+# Build artifacts
+*.tar.gz
+*.zip
+*.deb
+*.rpm
+*.AppImage
+
+# Documentation builds
+docs/_build/
+site/
+
+# Debug files
+*.log
+*.pid
+debug/
+
+# Keylight specific
+keylight-controller
+!keylight_controller.py
+*.sha256
