@@ -48,6 +48,16 @@ except ImportError:
     sys.exit(1)
 
 
+
+class JumpSlider(QSlider):
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            new_val = self.minimum() + (self.maximum() - self.minimum()) * event.position().x() / self.width()
+            self.setValue(round(new_val))
+            event.accept()
+        super().mousePressEvent(event)
+
+
 @dataclass
 class KeyLight:
     """Represents a Key Light device"""
@@ -151,7 +161,7 @@ class KeyLightWidget(QFrame):
         brightness_icon.setObjectName("sliderIcon")
         brightness_icon.setFixedWidth(20)
         
-        self.brightness_slider = QSlider(Qt.Horizontal)
+        self.brightness_slider = JumpSlider(Qt.Horizontal)
         self.brightness_slider.setRange(1, 100)  # Minimum 1% to prevent turning off via slider
         self.brightness_slider.setValue(max(1, self.keylight.brightness))  # Ensure minimum 1%
         self.brightness_slider.setObjectName("brightnessSlider")
@@ -173,7 +183,7 @@ class KeyLightWidget(QFrame):
         temp_icon.setObjectName("sliderIcon")
         temp_icon.setFixedWidth(20)
         
-        self.temp_slider = QSlider(Qt.Horizontal)
+        self.temp_slider = JumpSlider(Qt.Horizontal)
         self.temp_slider.setRange(143, 344)
         self.temp_slider.setValue(self.keylight.temperature)
         self.temp_slider.setObjectName("temperatureSlider")
@@ -397,6 +407,10 @@ class KeyLightController(QMainWindow):
             background-color: #2a2a2a;
             border-radius: 12px;
             border: 1px solid #3a3a3a;
+        }
+        
+        QFrame#KeyLightWidget::hover{
+            border: 2px solid #aaaaaa;
         }
         
         QLabel#deviceName {
