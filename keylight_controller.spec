@@ -2,8 +2,8 @@
 # PyInstaller spec file for Key Light Controller
 
 a = Analysis(
-    ['keylight_controller.py'],
-    pathex=[],
+    ['src/keylight_controller.py'],
+    pathex=["src"],
     binaries=[],
     datas=[],
     hiddenimports=[
