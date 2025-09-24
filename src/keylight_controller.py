@@ -190,9 +190,10 @@ class KeyLightWidget(QFrame):
         layout.addLayout(temp_layout)
         
         # Apply frame styling
-        self.setStyleSheet("")  # Will be set by main window
-        
-    def to_kelvin(self, value: int) -> int:
+        self.setStyleSheet("")  # Will be set by the main window
+
+    @staticmethod
+    def to_kelvin(value: int) -> int:
         """Convert Elgato temperature value to Kelvin"""
         return round((-4100 * value) / 201 + 1993300 / 201)
         
@@ -433,6 +434,10 @@ class KeyLightController(QMainWindow):
             font-weight: bold;
         }
         
+        QSlider {
+            min-height: 22px;   /* for the handles to be round */
+        }
+        
         QPushButton#menuButton:hover {
             color: #ffffff;
         }
@@ -444,12 +449,12 @@ class KeyLightController(QMainWindow):
         }
         
         QSlider::handle:horizontal {
-            width: 18px;
-            height: 18px;
+            width: 16px;
+            height: 16px;
             margin: -6px 0;
             border-radius: 9px;
-            background: #ffffff;
-            border: 1px solid #555555;
+            background: #888888;
+            border: 1px solid transparent; /* no outline */
         }
         
         QSlider#brightnessSlider::groove:horizontal {
@@ -457,21 +462,10 @@ class KeyLightController(QMainWindow):
                 stop:0 #222222, stop:1 #ffff88);
         }
         
-        QSlider#brightnessSlider::sub-page:horizontal {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #ffaa00, stop:1 #ffff88);
-            border-radius: 3px;
-        }
         
         QSlider#temperatureSlider::groove:horizontal {
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #ff9944, stop:1 #88aaff);
-        }
-        
-        QSlider#temperatureSlider::sub-page:horizontal {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #ff9944, stop:1 #88aaff);
-            border-radius: 3px;
+                stop:0 #88aaff, stop:1 #ff9944);
         }
         """
         self.setStyleSheet(style)

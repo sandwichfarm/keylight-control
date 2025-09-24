@@ -71,5 +71,5 @@ debug/
 
 # Keylight specific
 keylight-controller
-!keylight_controller.py
+!src/keylight_controller.py
 *.sha256
