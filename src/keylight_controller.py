@@ -449,7 +449,7 @@ class KeyLightController(QMainWindow):
             height: 18px;
             margin: -6px 0;
             border-radius: 9px;
-            background: #ffffff;
+            background: #4a4a4a;
             border: 1px solid #555555;
         }
         
