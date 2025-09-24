@@ -434,6 +434,10 @@ class KeyLightController(QMainWindow):
             font-weight: bold;
         }
         
+        QSlider {
+            min-height: 22px;   /* for the handles to be round */
+        }
+        
         QPushButton#menuButton:hover {
             color: #ffffff;
         }
@@ -445,12 +449,12 @@ class KeyLightController(QMainWindow):
         }
         
         QSlider::handle:horizontal {
-            width: 18px;
-            height: 18px;
+            width: 16px;
+            height: 16px;
             margin: -6px 0;
             border-radius: 9px;
-            background: #4a4a4a;
-            border: 1px solid #555555;
+            background: #888888;
+            border: 1px solid transparent; /* no outline */
         }
         
         QSlider#brightnessSlider::groove:horizontal {
