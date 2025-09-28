@@ -133,7 +133,7 @@ class KeyLightWidget(QFrame):
         header_layout = QHBoxLayout()
         
         # Power button (circular with icon)
-        self.power_button = QPushButton()
+        self.power_button = QPushButton("⏻")
         self.power_button.setCheckable(True)
         self.power_button.setObjectName("powerButton")
         self.power_button.setFixedSize(36, 36)
@@ -206,7 +206,31 @@ class KeyLightWidget(QFrame):
     def to_kelvin(value: int) -> int:
         """Convert Elgato temperature value to Kelvin"""
         return round((-4100 * value) / 201 + 1993300 / 201)
-        
+
+    @staticmethod
+    def to_slider_color(value: int) -> tuple[int, int, int]:
+        """Interpolate between slider left color (#88aaff) and right color (#ff9944)"""
+        left = (136, 170, 255)  # #88aaff
+        right = (255, 153, 68)  # #ff9944
+        t = (value - 143) / (344 - 143)
+        r = int(left[0] + (right[0] - left[0]) * t)
+        g = int(left[1] + (right[1] - left[1]) * t)
+        b = int(left[2] + (right[2] - left[2]) * t)
+        return r, g, b
+
+    @staticmethod
+    def percent_to_hex_alpha(percent: float):
+        """Convert 0-100 percent to two-digit hex alpha ('FF' for 100%, '00' for 0%)"""
+        # Clamp percent to 0-100
+        percent = max(0.0, min(100.0, percent))
+        alpha = int(round((percent / 100) * 255))
+        return f"{alpha:02X}"
+
+    def keylight_color(self):
+        r, g, b = self.to_slider_color(self.keylight.temperature)
+        a = int(255 * (self.keylight.brightness / 100))
+        return f"rgba({r}, {g}, {b}, {a})"
+
     def toggle_power(self):
         """Toggle the power state"""
         self.keylight.on = self.power_button.isChecked()
@@ -218,12 +242,14 @@ class KeyLightWidget(QFrame):
         self.keylight.brightness = value
         self.brightness_label.setText(f"{value}%")
         self.schedule_update()
+        self.update_power_button_style()
         
     def on_temperature_changed(self, value):
         """Handle temperature slider change"""
         self.keylight.temperature = value
         self.temp_label.setText(f"{self.to_kelvin(value)}K")
         self.schedule_update()
+        self.update_power_button_style()
         
     def schedule_update(self):
         """Schedule an update with throttling"""
@@ -252,17 +278,24 @@ class KeyLightWidget(QFrame):
     def update_power_button_style(self):
         """Update power button appearance based on state"""
         if self.keylight.on:
-            self.power_button.setStyleSheet("""
-                QPushButton#powerButton {
-                    background-color: #00E5FF;
-                    border: 2px solid #00E5FF;
-                }
+            color = self.keylight_color()
+            self.power_button.setStyleSheet(f"""
+                QPushButton#powerButton {{
+                    background-color: {color};
+                    border: 2px solid #ffffff;
+                    font-size: 30px;
+                    color: #ffffff;
+                    padding-bottom: 2px;
+                }}
             """)
         else:
             self.power_button.setStyleSheet("""
                 QPushButton#powerButton {
                     background-color: transparent;
                     border: 2px solid #555;
+                    color: #555;
+                    font-size: 30px;
+                    padding-bottom: 2px;
                 }
             """)
             
@@ -467,8 +500,17 @@ class KeyLightController(QMainWindow):
             height: 16px;
             margin: -6px 0;
             border-radius: 9px;
-            background: #888888;
-            border: 1px solid transparent; /* no outline */
+            background: #555555;
+            border: 1px solid transparent;
+        }
+        
+        QSlider::handle:horizontal::hover {
+            width: 16px;
+            height: 16px;
+            margin: -6px 0;
+            border-radius: 9px;
+            background: #666666;
+            border: 1px solid transparent;
         }
         
         QSlider#brightnessSlider::groove:horizontal {
