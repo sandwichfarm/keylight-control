@@ -28,8 +28,10 @@ from utils.color_utils import (
     slider_color_for_temp as util_slider_color_for_temp,
     percent_to_hex_alpha as util_percent_to_hex_alpha,
 )
+from ui.widgets.master_widget import MasterDeviceWidget
 from ui.widgets.jump_slider import JumpSlider
 from ui.widgets.rename_dialog import RenameDeviceDialog
+from ui.widgets.keylight_widget import KeyLightWidget
 from core.service import KeyLightService
 
 # Check Python version
@@ -355,7 +357,7 @@ class _MasterDeviceWidgetOld(QFrame):
             self.power_button.setText("○")
 
 
-class KeyLightWidget(QFrame):
+class _KeyLightWidgetOld(QFrame):
     """Widget for controlling a single Key Light"""
     power_state_changed = Signal()
     
