@@ -73,9 +73,14 @@ class KeyLightController(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Master controls row
+        # Master controls row inside a container that provides L/T/R margins only
         self.setup_master_controls()
-        main_layout.addWidget(self.master_panel)
+        self.master_row_container = QWidget()
+        master_row_layout = QHBoxLayout(self.master_row_container)
+        master_row_layout.setContentsMargins(8, 8, 8, 0)  # left, top, right; no bottom
+        master_row_layout.setSpacing(0)
+        master_row_layout.addWidget(self.master_panel)
+        main_layout.addWidget(self.master_row_container)
 
         # Scroll area for devices
         self.scroll_area = QScrollArea()
@@ -106,10 +111,12 @@ class KeyLightController(QMainWindow):
     def setup_master_controls(self):
         self.master_panel = QFrame()
         self.master_panel.setObjectName("MasterPanel")
-        self.master_panel.setFixedHeight(70)
+        # Slightly thinner top bar
+        self.master_panel.setFixedHeight(60)
 
         master_layout = QHBoxLayout(self.master_panel)
-        master_layout.setContentsMargins(16, 8, 16, 8)
+        # Reduce internal padding for a tighter bar
+        master_layout.setContentsMargins(8, 6, 8, 6)
         master_layout.setSpacing(8)
 
         self.master_power_button = QPushButton("⏻")
