@@ -23,6 +23,12 @@ from config import DeviceConfig
 from core.models import KeyLight
 from core.discovery import KeyLightDiscovery
 from core.service import KeyLightService
+from utils.color_utils import (
+    elgato_to_kelvin as util_elgato_to_kelvin,
+    slider_color_for_temp as util_slider_color_for_temp,
+    percent_to_hex_alpha as util_percent_to_hex_alpha,
+)
+from core.service import KeyLightService
 
 # Check Python version
 if sys.version_info < (3, 8):
@@ -541,26 +547,17 @@ class KeyLightWidget(QFrame):
     @staticmethod
     def to_kelvin(value: int) -> int:
         """Convert Elgato temperature value to Kelvin"""
-        return round((-4100 * value) / 201 + 1993300 / 201)
+        return util_elgato_to_kelvin(value)
 
     @staticmethod
     def to_slider_color(value: int) -> tuple[int, int, int]:
         """Interpolate between slider left color (#88aaff) and right color (#ff9944)"""
-        left = (136, 170, 255)  # #88aaff
-        right = (255, 153, 68)  # #ff9944
-        t = (value - 143) / (344 - 143)
-        r = int(left[0] + (right[0] - left[0]) * t)
-        g = int(left[1] + (right[1] - left[1]) * t)
-        b = int(left[2] + (right[2] - left[2]) * t)
-        return r, g, b
+        return util_slider_color_for_temp(value)
 
     @staticmethod
     def percent_to_hex_alpha(percent: float):
         """Convert 0-100 percent to two-digit hex alpha ('FF' for 100%, '00' for 0%)"""
-        # Clamp percent to 0-100
-        percent = max(0.0, min(100.0, percent))
-        alpha = int(round((percent / 100) * 255))
-        return f"{alpha:02X}"
+        return util_percent_to_hex_alpha(percent)
 
     def keylight_color(self):
         r, g, b = self.to_slider_color(self.keylight.temperature)
