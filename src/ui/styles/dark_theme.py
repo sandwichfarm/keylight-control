@@ -35,7 +35,8 @@ def get_style() -> str:
         background-color: #333333;
         border-radius: 12px;
         border: 1px solid #4a4a4a;
-        margin-bottom: 8px;
+        /* layout spacing controls separation; no extra margin here */
+        margin: 0;
     }
 
     QFrame#MasterDeviceWidget::hover{
@@ -47,7 +48,8 @@ def get_style() -> str:
         background-color: #2a2a2a;
         border-radius: 12px;
         border: 1px solid #3a3a3a;
-        margin: 8px;
+        /* avoid double spacing with container margins */
+        margin: 0;
     }
 
     QLabel#masterLabel {
