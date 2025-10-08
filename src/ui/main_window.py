@@ -202,7 +202,7 @@ class KeyLightController(QMainWindow):
             widget.keylight.on = master_state
             widget.power_button.setChecked(master_state)
             widget.update_power_button_style()
-            widget.update_device()
+            widget.schedule_update()
         self.update_master_button_style()
 
     def toggle_sync_controls(self):
@@ -323,10 +323,12 @@ class KeyLightController(QMainWindow):
             if i == 0 or widget.is_locked:
                 continue
             widget.keylight.temperature = reference_temp
+            old = widget.temp_slider.blockSignals(True)
             widget.temp_slider.setValue(reference_temp)
+            widget.temp_slider.blockSignals(old)
             widget.temp_label.setText(f"{widget.to_kelvin(reference_temp)}K")
             widget.update_power_button_style()
-            widget.update_device()
+            widget.schedule_update()
         self.update_master_button_style()
 
     def sync_brightness_once(self):
@@ -337,10 +339,12 @@ class KeyLightController(QMainWindow):
             if i == 0 or widget.is_locked:
                 continue
             widget.keylight.brightness = reference_brightness
+            old = widget.brightness_slider.blockSignals(True)
             widget.brightness_slider.setValue(max(1, reference_brightness))
+            widget.brightness_slider.blockSignals(old)
             widget.brightness_label.setText(f"{reference_brightness}%")
             widget.update_power_button_style()
-            widget.update_device()
+            widget.schedule_update()
         self.update_master_button_style()
 
     def sync_all_once(self):
@@ -354,12 +358,16 @@ class KeyLightController(QMainWindow):
             widget.keylight.brightness = reference_device.brightness
             widget.keylight.temperature = reference_device.temperature
             widget.power_button.setChecked(reference_device.on)
+            b_old = widget.brightness_slider.blockSignals(True)
             widget.brightness_slider.setValue(max(1, reference_device.brightness))
+            widget.brightness_slider.blockSignals(b_old)
             widget.brightness_label.setText(f"{reference_device.brightness}%")
+            t_old = widget.temp_slider.blockSignals(True)
             widget.temp_slider.setValue(reference_device.temperature)
+            widget.temp_slider.blockSignals(t_old)
             widget.temp_label.setText(f"{widget.to_kelvin(reference_device.temperature)}K")
             widget.update_power_button_style()
-            widget.update_device()
+            widget.schedule_update()
         self.update_master_button_state()
         self.update_master_button_style()
 
@@ -388,11 +396,15 @@ class KeyLightController(QMainWindow):
             if self.all_sync_enabled:
                 if changed_attribute == "temperature":
                     widget.keylight.temperature = value
+                    old = widget.temp_slider.blockSignals(True)
                     widget.temp_slider.setValue(value)
+                    widget.temp_slider.blockSignals(old)
                     widget.temp_label.setText(f"{widget.to_kelvin(value)}K")
                 elif changed_attribute == "brightness":
                     widget.keylight.brightness = value
+                    old = widget.brightness_slider.blockSignals(True)
                     widget.brightness_slider.setValue(max(1, value))
+                    widget.brightness_slider.blockSignals(old)
                     widget.brightness_label.setText(f"{value}%")
                 elif changed_attribute == "power":
                     widget.keylight.on = value
@@ -401,13 +413,17 @@ class KeyLightController(QMainWindow):
                 self.pending_sync_updates[i] = widget
             elif self.temp_sync_enabled and changed_attribute == "temperature":
                 widget.keylight.temperature = value
+                old = widget.temp_slider.blockSignals(True)
                 widget.temp_slider.setValue(value)
+                widget.temp_slider.blockSignals(old)
                 widget.temp_label.setText(f"{widget.to_kelvin(value)}K")
                 widget.update_power_button_style()
                 self.pending_sync_updates[i] = widget
             elif self.brightness_sync_enabled and changed_attribute == "brightness":
                 widget.keylight.brightness = value
+                old = widget.brightness_slider.blockSignals(True)
                 widget.brightness_slider.setValue(max(1, value))
+                widget.brightness_slider.blockSignals(old)
                 widget.brightness_label.setText(f"{value}%")
                 widget.update_power_button_style()
                 self.pending_sync_updates[i] = widget
@@ -420,7 +436,7 @@ class KeyLightController(QMainWindow):
             self.sync_timer.stop()
             return
         for widget in self.pending_sync_updates.values():
-            widget.update_device()
+            widget.schedule_update()
         self.pending_sync_updates.clear()
         self.sync_timer.stop()
 

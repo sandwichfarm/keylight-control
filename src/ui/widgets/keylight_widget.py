@@ -374,22 +374,30 @@ class KeyLightWidget(QFrame):
                 target_device.temperature = source_device.temperature
 
                 target_widget.power_button.setChecked(source_device.on)
+                b_old = target_widget.brightness_slider.blockSignals(True)
                 target_widget.brightness_slider.setValue(max(1, source_device.brightness))
+                target_widget.brightness_slider.blockSignals(b_old)
                 target_widget.brightness_label.setText(f"{source_device.brightness}%")
+                t_old = target_widget.temp_slider.blockSignals(True)
                 target_widget.temp_slider.setValue(source_device.temperature)
+                target_widget.temp_slider.blockSignals(t_old)
                 target_widget.temp_label.setText(f"{target_widget.to_kelvin(source_device.temperature)}K")
 
             elif sync_type == "temperature":
                 target_device.temperature = source_device.temperature
+                t_old = target_widget.temp_slider.blockSignals(True)
                 target_widget.temp_slider.setValue(source_device.temperature)
+                target_widget.temp_slider.blockSignals(t_old)
                 target_widget.temp_label.setText(f"{target_widget.to_kelvin(source_device.temperature)}K")
 
             elif sync_type == "brightness":
                 target_device.brightness = source_device.brightness
+                b_old = target_widget.brightness_slider.blockSignals(True)
                 target_widget.brightness_slider.setValue(max(1, source_device.brightness))
+                target_widget.brightness_slider.blockSignals(b_old)
                 target_widget.brightness_label.setText(f"{source_device.brightness}%")
 
             target_widget.update_power_button_style()
-            target_widget.update_device()
+            target_widget.schedule_update()
 
         controller.update_master_button_style()

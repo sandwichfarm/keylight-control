@@ -148,7 +148,7 @@ class MasterDeviceWidget(QFrame):
             widget.keylight.on = new_state
             widget.power_button.setChecked(new_state)
             widget.update_power_button_style()
-            widget.update_device()
+            widget.schedule_update()
         self.update_power_button_style()
 
     def brightness_changed(self, value):
@@ -159,10 +159,12 @@ class MasterDeviceWidget(QFrame):
             if not self.ignore_locks and getattr(widget, "is_locked", False):
                 continue
             widget.keylight.brightness = value
+            old = widget.brightness_slider.blockSignals(True)
             widget.brightness_slider.setValue(value)
+            widget.brightness_slider.blockSignals(old)
             widget.brightness_label.setText(f"{value}%")
             widget.update_power_button_style()
-            widget.update_device()
+            widget.schedule_update()
 
     def temperature_changed(self, value):
         if not self.controller.keylights:
@@ -173,10 +175,12 @@ class MasterDeviceWidget(QFrame):
             if not self.ignore_locks and getattr(widget, "is_locked", False):
                 continue
             widget.keylight.temperature = value
+            old = widget.temp_slider.blockSignals(True)
             widget.temp_slider.setValue(value)
+            widget.temp_slider.blockSignals(old)
             widget.temp_label.setText(f"{kelvin}K")
             widget.update_power_button_style()
-            widget.update_device()
+            widget.schedule_update()
 
     def to_kelvin(self, slider_value):
         return int(2900 + (slider_value - 143) * (7000 - 2900) / (344 - 143))
