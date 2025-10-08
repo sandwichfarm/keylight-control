@@ -22,6 +22,7 @@ from typing import List, Dict, Optional
 from config import DeviceConfig
 from core.models import KeyLight
 from core.discovery import KeyLightDiscovery
+from core.service import KeyLightService
 
 # Check Python version
 if sys.version_info < (3, 8):
@@ -664,54 +665,44 @@ class KeyLightWidget(QFrame):
         asyncio.create_task(self._update_device_async())
         
     async def _update_device_async(self):
-        """Async update to device via HTTP API"""
-        url = f"http://{self.keylight.ip}:{self.keylight.port}/elgato/lights"
-        data = {
-            "numberOfLights": 1,
-            "lights": [{
-                "on": 1 if self.keylight.on else 0,
-                "brightness": self.keylight.brightness,
-                "temperature": self.keylight.temperature
-            }]
-        }
-        
-        try:
-            # Set a timeout to prevent hanging
-            timeout = aiohttp.ClientTimeout(total=2)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.put(url, json=data) as response:
-                    if response.status != 200:
-                        print(f"Failed to update {self.keylight.name}: {response.status}")
-        except asyncio.TimeoutError:
-            pass  # Silently ignore timeout errors to reduce spam
-        except Exception as e:
-            pass  # Silently ignore connection errors to reduce spam
+        """Async update to device via service layer"""
+        # Locate controller to access service
+        controller = self.parent()
+        while controller and not isinstance(controller, KeyLightController):
+            controller = controller.parent()
+        if controller:
+            try:
+                await controller.service.set_light_state(self.keylight)
+            except Exception:
+                pass
             
     def update_from_device(self):
         """Fetch current state from device"""
         asyncio.create_task(self._update_from_device_async())
         
     async def _update_from_device_async(self):
-        """Async fetch from device via HTTP API"""
-        url = f"http://{self.keylight.ip}:{self.keylight.port}/elgato/lights"
-        
+        """Async fetch from device via service layer"""
+        # Locate controller to access service
+        controller = self.parent()
+        while controller and not isinstance(controller, KeyLightController):
+            controller = controller.parent()
+        if not controller:
+            return
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        light_data = data['lights'][0]
-                        self.keylight.on = bool(light_data['on'])
-                        self.keylight.brightness = light_data['brightness']
-                        self.keylight.temperature = light_data['temperature']
-                        
-                        # Update UI
-                        self.power_button.setChecked(self.keylight.on)
-                        self.brightness_slider.setValue(max(1, self.keylight.brightness))  # Ensure min 1%
-                        self.temp_slider.setValue(self.keylight.temperature)
-                        self.update_power_button_style()
-                        self.power_state_changed.emit()
-        except Exception as e:
+            data = await controller.service.fetch_light_state(self.keylight)
+            if data and data.get('lights'):
+                light_data = data['lights'][0]
+                self.keylight.on = bool(light_data.get('on', self.keylight.on))
+                self.keylight.brightness = light_data.get('brightness', self.keylight.brightness)
+                self.keylight.temperature = light_data.get('temperature', self.keylight.temperature)
+                
+                # Update UI
+                self.power_button.setChecked(self.keylight.on)
+                self.brightness_slider.setValue(max(1, self.keylight.brightness))
+                self.temp_slider.setValue(self.keylight.temperature)
+                self.update_power_button_style()
+                self.power_state_changed.emit()
+        except Exception:
             pass  # Silently ignore fetch errors to reduce spam
     
     def show_device_menu(self):
@@ -935,6 +926,7 @@ class KeyLightController(QMainWindow):
         self.keylight_widgets = []
         self.device_config = DeviceConfig()
         self.discovery = KeyLightDiscovery()
+        self.service = KeyLightService()
         self.master_device_widget = None  # Will be created in setup_ui
         self.setup_ui()
         self.apply_dark_theme()
