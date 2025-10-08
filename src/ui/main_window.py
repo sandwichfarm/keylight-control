@@ -112,11 +112,11 @@ class KeyLightController(QMainWindow):
         self.master_panel = QFrame()
         self.master_panel.setObjectName("MasterPanel")
         # Slightly thinner top bar
-        self.master_panel.setFixedHeight(60)
+        self.master_panel.setFixedHeight(56)
 
         master_layout = QHBoxLayout(self.master_panel)
         # Reduce internal padding for a tighter bar
-        master_layout.setContentsMargins(8, 6, 8, 6)
+        master_layout.setContentsMargins(8, 4, 8, 4)
         master_layout.setSpacing(8)
 
         self.master_power_button = QPushButton("⏻")
