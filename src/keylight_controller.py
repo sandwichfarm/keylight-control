@@ -21,6 +21,7 @@ from typing import List, Dict, Optional
 # Import local modules
 from config import DeviceConfig
 from core.models import KeyLight
+from core.discovery import KeyLightDiscovery
 
 # Check Python version
 if sys.version_info < (3, 8):
@@ -142,86 +143,6 @@ class RenameDeviceDialog(QDialog):
 
 
  
-
-class KeyLightDiscovery(QObject):
-    """Discovers Key Lights on the network using mDNS"""
-    device_found = Signal(dict)
-    mac_fetch_requested = Signal(dict)
-    
-    def __init__(self):
-        super().__init__()
-        self.zeroconf = Zeroconf()
-        self.browser = None
-        
-    def start_discovery(self):
-        """Start discovering Key Light devices"""
-        self.browser = ServiceBrowser(
-            self.zeroconf,
-            "_elg._tcp.local.",
-            handlers=[self._on_service_state_change]
-        )
-        
-    def _on_service_state_change(self, zeroconf, service_type, name, state_change):
-        """Handle service discovery events"""
-        from zeroconf import ServiceStateChange
-        if state_change == ServiceStateChange.Added:
-            info = zeroconf.get_service_info(service_type, name)
-            if info:
-                device_info = {
-                    'name': name.replace('._elg._tcp.local.', ''),
-                    'ip': '.'.join(map(str, info.addresses[0])),
-                    'port': info.port
-                }
-                # Request MAC address fetch from main thread
-                self.mac_fetch_requested.emit(device_info)
-    
-    async def _fetch_mac_address(self, device_info):
-        """Fetch MAC address from device and emit the complete device info"""
-        mac_address = await self._get_device_mac_address(device_info['ip'], device_info['port'])
-        device_info['mac_address'] = mac_address
-        self.device_found.emit(device_info)
-    
-    async def _get_device_mac_address(self, ip: str, port: int) -> str:
-        """Get MAC address from device API or ARP table"""
-        # First try to get it from the device's accessory-info endpoint
-        try:
-            url = f"http://{ip}:{port}/elgato/accessory-info"
-            timeout = aiohttp.ClientTimeout(total=3)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        # Look for MAC address in various possible fields
-                        mac = data.get('macAddress') or data.get('mac') or data.get('serialNumber')
-                        if mac:
-                            return mac.upper().replace(':', '').replace('-', '')
-        except Exception:
-            pass
-        
-        # Fallback: try to get MAC from ARP table using system command
-        try:
-            import subprocess
-            result = subprocess.run(['arp', '-n', ip], capture_output=True, text=True, timeout=2)
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                for line in lines:
-                    if ip in line and 'incomplete' not in line.lower():
-                        parts = line.split()
-                        for part in parts:
-                            if ':' in part and len(part.replace(':', '')) == 12:
-                                return part.upper().replace(':', '')
-        except Exception:
-            pass
-        
-        # Last resort: use IP address as a fallback identifier
-        return f"IP_{ip.replace('.', '_')}"
-                
-    def stop_discovery(self):
-        """Stop discovery and cleanup"""
-        if self.browser:
-            self.browser.cancel()
-        self.zeroconf.close()
-
 
 class MasterDeviceWidget(QFrame):
     """Master control widget that looks like a device but controls all devices"""
