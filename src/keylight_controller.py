@@ -11,6 +11,7 @@ __license__ = "GPL-3.0"
 import sys
 import socket
 import asyncio
+import signal
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTimer
@@ -54,6 +55,32 @@ def main() -> None:
     controller = KeyLightController()
     controller.show()
 
+    # Graceful signal handling (SIGINT/SIGTERM) to quit cleanly
+    def _handle_signal(signum, _frame):
+        try:
+            # Stop discovery and request app quit
+            try:
+                controller.quit_application()
+            except Exception:
+                pass
+            # Stop asyncio loop if present
+            try:
+                loop.stop()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    try:
+        signal.signal(signal.SIGINT, _handle_signal)
+    except Exception:
+        pass
+    if hasattr(signal, "SIGTERM"):
+        try:
+            signal.signal(signal.SIGTERM, _handle_signal)
+        except Exception:
+            pass
+
     # Allow secondary invocations to activate existing window
     def check_for_activation():
         try:
@@ -79,4 +106,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
