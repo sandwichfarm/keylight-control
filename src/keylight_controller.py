@@ -32,6 +32,7 @@ from ui.widgets.master_widget import MasterDeviceWidget
 from ui.widgets.jump_slider import JumpSlider
 from ui.widgets.rename_dialog import RenameDeviceDialog
 from ui.widgets.keylight_widget import KeyLightWidget
+from ui.main_window import KeyLightController as MainWindowController
 
 # Check Python version
 if sys.version_info < (3, 8):
@@ -1680,7 +1681,7 @@ def main():
         loop = qasync.QEventLoop(app)
         asyncio.set_event_loop(loop)
     
-    controller = KeyLightController()
+    controller = MainWindowController()
     controller.show()
     
     # Set up a timer to check for activation signals from other instances
