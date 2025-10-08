@@ -25,8 +25,10 @@ from config import DeviceConfig
 from core.models import KeyLight
 from core.discovery import KeyLightDiscovery
 from core.service import KeyLightService
+from core.preferences import PreferencesService
 from ui.widgets.master_widget import MasterDeviceWidget
 from ui.widgets.keylight_widget import KeyLightWidget
+from ui.preferences.settings_dialog import SettingsDialog
 
 
 class KeyLightController(QMainWindow):
@@ -39,6 +41,7 @@ class KeyLightController(QMainWindow):
         self.device_config = DeviceConfig()
         self.discovery = KeyLightDiscovery()
         self.service = KeyLightService()
+        self.prefs = PreferencesService(self.device_config)
         self.master_device_widget = None  # Will be created in setup_ui
         self.setup_ui()
         self.apply_dark_theme()
@@ -53,6 +56,10 @@ class KeyLightController(QMainWindow):
 
         # Add keyboard shortcuts
         self.setup_shortcuts()
+
+        # Apply preferences on startup and subscribe to changes
+        self._apply_all_preferences()
+        self.prefs.setting_changed.connect(self._on_setting_changed)
 
     def setup_ui(self):
         """Setup the main UI"""
@@ -191,6 +198,15 @@ class KeyLightController(QMainWindow):
         self.pending_sync_updates = {}
 
         master_layout.addWidget(self.sync_container)
+
+        # Settings button (three dots)
+        self.settings_button = QPushButton("⋯")
+        self.settings_button.setObjectName("settingsButton")
+        self.settings_button.setFixedSize(25, 25)
+        self.settings_button.setToolTip("Settings")
+        self.settings_button.clicked.connect(self.open_settings_dialog)
+        master_layout.addWidget(self.settings_button)
+
         master_layout.addStretch()
 
     # --- actions and helpers ---
@@ -510,8 +526,15 @@ class KeyLightController(QMainWindow):
             self.master_power_button.setChecked(False)
             self.update_master_button_style()
             return
-        any_on = any(kl.on for kl in self.keylights)
-        self.master_power_button.setChecked(any_on)
+        try:
+            semantics = str(self.prefs.get("advanced.master_power_semantics", "AnyOn"))
+        except Exception:
+            semantics = "AnyOn"
+        if semantics == "AllOn":
+            state = all(kl.on for kl in self.keylights)
+        else:
+            state = any(kl.on for kl in self.keylights)
+        self.master_power_button.setChecked(state)
         self.update_master_button_style()
 
     def apply_blur_effect(self):
@@ -548,7 +571,13 @@ class KeyLightController(QMainWindow):
         quit_shortcut = QShortcut(QKeySequence.Quit, self)
         quit_shortcut.activated.connect(self.quit_application)
         escape_shortcut = QShortcut(QKeySequence("Escape"), self)
-        escape_shortcut.activated.connect(self.hide)
+        escape_shortcut.activated.connect(self._on_escape)
+
+    def _on_escape(self):
+        if hasattr(self, 'prefs') and bool(self.prefs.get("general.hide_on_esc", True)):
+            self.hide()
+        else:
+            pass
 
     def quit_application(self):
         self.discovery.stop_discovery()
@@ -563,6 +592,45 @@ class KeyLightController(QMainWindow):
                 self.show()
                 self.raise_()
                 self.activateWindow()
+
+    # ---- Preferences application ----
+    def open_settings_dialog(self):
+        dlg = SettingsDialog(self.prefs, self)
+        dlg.exec()
+
+    def _apply_all_preferences(self):
+        self._apply_features_visibility()
+        self._apply_widget_update_interval()
+        self.update_master_button_state()
+
+    def _on_setting_changed(self, key: str, _value):
+        if key.startswith("features."):
+            self._apply_features_visibility()
+        elif key == "perf.widget_update_interval_ms":
+            self._apply_widget_update_interval()
+        elif key == "advanced.master_power_semantics":
+            self.update_master_button_state()
+
+    def _apply_features_visibility(self):
+        show_sync = True
+        try:
+            show_sync = bool(self.prefs.get("features.show_sync_buttons", True))
+        except Exception:
+            pass
+        self.sync_reveal_button.setVisible(show_sync)
+        if not show_sync:
+            self.sync_container.setVisible(False)
+
+    def _apply_widget_update_interval(self):
+        try:
+            interval = int(self.prefs.get("perf.widget_update_interval_ms", 50))
+        except Exception:
+            interval = 50
+        for w in self.keylight_widgets:
+            try:
+                w.update_timer.setInterval(interval)
+            except Exception:
+                pass
 
     def fetch_device_mac(self, device_info):
         asyncio.create_task(self._fetch_and_add_device(device_info))
