@@ -5,7 +5,7 @@ import sys
 import socket
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QBrush, QColor, QPen, QKeySequence, QShortcut
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -15,10 +15,11 @@ from PySide6.QtWidgets import (
     QPushButton,
     QLabel,
     QScrollArea,
-    QMenu,
     QSystemTrayIcon,
     QGraphicsBlurEffect,
 )
+from PySide6.QtWidgets import QMenu  # kept for type hints elsewhere if needed
+from utils.system_tray import create_tray_icon
 
 from config import DeviceConfig
 from core.models import KeyLight
@@ -517,28 +518,7 @@ class KeyLightController(QMainWindow):
         self.setStyleSheet(get_style())
 
     def setup_system_tray(self):
-        pixmap = QPixmap(64, 64)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(QBrush(QColor("#00E5FF")))
-        painter.setPen(QPen(Qt.NoPen))
-        painter.drawEllipse(8, 8, 48, 48)
-        painter.end()
-        icon = QIcon(pixmap)
-
-        self.tray_icon = QSystemTrayIcon(icon, self)
-        self.tray_icon.setToolTip("Key Light Control")
-        tray_menu = QMenu()
-        show_action = QAction("Show", self)
-        show_action.triggered.connect(self.show)
-        tray_menu.addAction(show_action)
-        quit_action = QAction("Quit", self)
-        quit_action.triggered.connect(self.quit_application)
-        tray_menu.addAction(quit_action)
-        self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.activated.connect(self.on_tray_activated)
-        self.tray_icon.show()
+        self.tray_icon = create_tray_icon(self)
 
     def setup_shortcuts(self):
         quit_shortcut = QShortcut(QKeySequence.Quit, self)
@@ -634,4 +614,3 @@ class KeyLightController(QMainWindow):
                     QSystemTrayIcon.Information,
                     2000,
                 )
-
