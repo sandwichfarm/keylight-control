@@ -35,7 +35,7 @@ class MasterDeviceWidget(QFrame):
         header_layout.setContentsMargins(0, 0, 0, 0)
 
         # Power button
-        self.power_button = QPushButton()
+        self.power_button = QPushButton("○")
         self.power_button.setObjectName("masterPowerButton")
         self.power_button.setCheckable(True)
         self.power_button.setFixedSize(36, 36)
@@ -223,14 +223,38 @@ class MasterDeviceWidget(QFrame):
             avg_g = min(255, total_g // device_count)
             avg_b = min(255, total_b // device_count)
             color = f"rgb({avg_r}, {avg_g}, {avg_b})"
-        self.power_button.setStyleSheet(
-            f"""
-            QPushButton#powerButton {{
-                background-color: {color if device_count else 'transparent'};
-                border: 2px solid {'#ffffff' if device_count else '#555'};
-                font-size: 30px;
-                color: {'#ffffff' if device_count else '#555'};
-                padding-bottom: 2px;
-            }}
-            """
-        )
+        if self.power_button.isChecked() and device_count > 0:
+            self.power_button.setStyleSheet(
+                f"""
+                QPushButton#masterPowerButton {{
+                    background-color: {color};
+                    border: 2px solid #ffffff;
+                    border-radius: 18px;
+                    font-size: 16px;
+                    font-weight: bold;
+                    color: #ffffff;
+                }}
+                QPushButton#masterPowerButton:hover {{
+                    border: 2px solid #cccccc;
+                }}
+                """
+            )
+            self.power_button.setText("●")
+        else:
+            self.power_button.setStyleSheet(
+                """
+                QPushButton#masterPowerButton {
+                    background-color: #404040;
+                    border: 2px solid #666666;
+                    border-radius: 18px;
+                    color: #888888;
+                    font-size: 16px;
+                    font-weight: bold;
+                }
+                QPushButton#masterPowerButton:hover {
+                    background-color: #4a4a4a;
+                    border: 2px solid #777777;
+                }
+                """
+            )
+            self.power_button.setText("○")

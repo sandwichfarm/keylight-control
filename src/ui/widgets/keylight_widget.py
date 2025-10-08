@@ -292,15 +292,15 @@ class KeyLightWidget(QFrame):
 
         if len(controller.keylights) > 1:
             menu.addSeparator()
-            sync_temp_action = QAction("Sync Temperature", self)
+            sync_temp_action = QAction("Copy temperature to devices", self)
             sync_temp_action.triggered.connect(lambda: self.sync_to_others(controller, "temperature"))
             menu.addAction(sync_temp_action)
 
-            sync_brightness_action = QAction("Sync Brightness", self)
+            sync_brightness_action = QAction("Copy brightness to devices", self)
             sync_brightness_action.triggered.connect(lambda: self.sync_to_others(controller, "brightness"))
             menu.addAction(sync_brightness_action)
 
-            sync_all_action = QAction("Sync All", self)
+            sync_all_action = QAction("Copy all settings to devices", self)
             sync_all_action.triggered.connect(lambda: self.sync_to_others(controller, "all"))
             menu.addAction(sync_all_action)
 
@@ -393,4 +393,3 @@ class KeyLightWidget(QFrame):
             target_widget.update_device()
 
         controller.update_master_button_style()
-

@@ -206,4 +206,25 @@ def get_style() -> str:
         padding: 4px 8px;
         font-size: 12px;
     }
+
+    /* Menus */
+    QMenu {
+        background-color: #2a2a2a;
+        border: 1px solid #555555;
+        color: #ffffff;
+    }
+
+    QMenu::item {
+        padding: 6px 12px;
+        color: #ffffff;
+    }
+
+    QMenu::item:selected {
+        background-color: #00E5FF;
+        color: #000000;
+    }
+
+    QMenu::item:disabled {
+        color: #888888;
+    }
     """
