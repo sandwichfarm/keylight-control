@@ -237,6 +237,7 @@ class KeyLightWidget(QFrame):
     def __init__(self, keylight: KeyLight, parent=None):
         super().__init__(parent)
         self.keylight = keylight
+        self.is_locked = False  # Lock state for sync protection
         self.pending_update = None
         self.last_update_time = 0
         self.update_timer = QTimer()
@@ -244,6 +245,7 @@ class KeyLightWidget(QFrame):
         self.update_timer.setInterval(50)  # Process updates every 50ms max
         self.setup_ui()
         self.update_from_device()
+        self.load_lock_state()
         
     def setup_ui(self):
         """Setup the UI to match Elgato Control Center style"""
@@ -364,6 +366,13 @@ class KeyLightWidget(QFrame):
         self.update_power_button_style()
         self.power_state_changed.emit()
         
+        # Propagate sync if enabled
+        controller = self.parent()
+        while controller and not isinstance(controller, KeyLightController):
+            controller = controller.parent()
+        if controller:
+            controller.propagate_sync_changes(self, 'power', self.keylight.on)
+        
     def on_brightness_changed(self, value):
         """Handle brightness slider change"""
         self.keylight.brightness = value
@@ -377,6 +386,7 @@ class KeyLightWidget(QFrame):
             controller = controller.parent()
         if controller:
             controller.update_master_button_style()
+            controller.propagate_sync_changes(self, 'brightness', value)
         
     def on_temperature_changed(self, value):
         """Handle temperature slider change"""
@@ -391,6 +401,7 @@ class KeyLightWidget(QFrame):
             controller = controller.parent()
         if controller:
             controller.update_master_button_style()
+            controller.propagate_sync_changes(self, 'temperature', value)
         
     def schedule_update(self):
         """Schedule an update with throttling"""
@@ -465,9 +476,9 @@ class KeyLightWidget(QFrame):
                     if response.status != 200:
                         print(f"Failed to update {self.keylight.name}: {response.status}")
         except asyncio.TimeoutError:
-            print(f"Timeout updating {self.keylight.name}")
+            pass  # Silently ignore timeout errors to reduce spam
         except Exception as e:
-            print(f"Error updating {self.keylight.name}: {e}")
+            pass  # Silently ignore connection errors to reduce spam
             
     def update_from_device(self):
         """Fetch current state from device"""
@@ -494,7 +505,7 @@ class KeyLightWidget(QFrame):
                         self.update_power_button_style()
                         self.power_state_changed.emit()
         except Exception as e:
-            print(f"Error fetching state from {self.keylight.name}: {e}")
+            pass  # Silently ignore fetch errors to reduce spam
     
     def show_device_menu(self):
         """Show the device context menu"""
@@ -519,6 +530,37 @@ class KeyLightWidget(QFrame):
         has_custom = controller.device_config.has_custom_label(self.keylight.mac_address)
         reset_action.setEnabled(has_custom)
         menu.addAction(reset_action)
+        
+        # Add separator before lock/unlock
+        menu.addSeparator()
+        
+        # Lock/Unlock toggle
+        lock_text = 'Unlock Device' if self.is_locked else 'Lock Device'
+        lock_action = QAction(lock_text, self)
+        lock_action.triggered.connect(self.toggle_lock)
+        menu.addAction(lock_action)
+        
+        # Add separator for sync options (only show if there are multiple devices)
+        if len(controller.keylights) > 1:
+            menu.addSeparator()
+            
+            # Sync all settings to other devices
+            sync_all_action = QAction('Copy All to Others', self)
+            sync_all_action.triggered.connect(lambda: self.sync_to_others(controller, 'all'))
+            menu.addAction(sync_all_action)
+            
+            # Add separator before individual setting syncs
+            menu.addSeparator()
+            
+            # Sync temperature to other devices
+            sync_temp_action = QAction('Copy Temperature to Others', self)
+            sync_temp_action.triggered.connect(lambda: self.sync_to_others(controller, 'temperature'))
+            menu.addAction(sync_temp_action)
+            
+            # Sync brightness to other devices
+            sync_brightness_action = QAction('Copy Brightness to Others', self)
+            sync_brightness_action.triggered.connect(lambda: self.sync_to_others(controller, 'brightness'))
+            menu.addAction(sync_brightness_action)
         
         # Apply dark theme to menu
         menu.setStyleSheet("""
@@ -584,6 +626,101 @@ class KeyLightWidget(QFrame):
             self.name_label.setText(original_name)
         else:
             print(f"Failed to reset label for {original_name}")
+    
+    def toggle_lock(self):
+        """Toggle the lock state of this device"""
+        self.is_locked = not self.is_locked
+        self.update_lock_visual()
+        self.save_lock_state()
+    
+    def load_lock_state(self):
+        """Load lock state from config"""
+        # Get controller reference to access device config
+        controller = self.parent()
+        while controller and not isinstance(controller, KeyLightController):
+            controller = controller.parent()
+        
+        if controller and controller.device_config:
+            self.is_locked = controller.device_config.get_lock_state(self.keylight.mac_address)
+            self.update_lock_visual()
+    
+    def save_lock_state(self):
+        """Save lock state to config"""
+        # Get controller reference to access device config
+        controller = self.parent()
+        while controller and not isinstance(controller, KeyLightController):
+            controller = controller.parent()
+        
+        if controller and controller.device_config:
+            controller.device_config.set_lock_state(self.keylight.mac_address, self.is_locked)
+    
+    def update_lock_visual(self):
+        """Update visual indication of lock state"""
+        if self.is_locked:
+            # Add lock indicator - subtle orange border
+            self.setStyleSheet(self.styleSheet() + """
+                KeyLightWidget {
+                    border: 2px solid #ff6b35;
+                }
+            """)
+        else:
+            # Remove lock styling by resetting to base style
+            self.setStyleSheet("")
+    
+    def sync_to_others(self, controller, sync_type):
+        """Sync this device's settings to all other devices"""
+        if len(controller.keylights) < 2:
+            return
+        
+        # Don't allow syncing from locked devices
+        if self.is_locked:
+            return
+        
+        source_device = self.keylight
+        
+        # Find all other devices (excluding this one)
+        for i, widget in enumerate(controller.keylight_widgets):
+            if widget.keylight.mac_address == source_device.mac_address:
+                continue  # Skip self
+            
+            # Skip locked devices
+            if widget.is_locked:
+                continue
+            
+            target_widget = widget
+            target_device = widget.keylight
+            
+            if sync_type == 'all':
+                # Sync all settings
+                target_device.on = source_device.on
+                target_device.brightness = source_device.brightness
+                target_device.temperature = source_device.temperature
+                
+                # Update UI
+                target_widget.power_button.setChecked(source_device.on)
+                target_widget.brightness_slider.setValue(max(1, source_device.brightness))
+                target_widget.brightness_label.setText(f"{source_device.brightness}%")
+                target_widget.temp_slider.setValue(source_device.temperature)
+                target_widget.temp_label.setText(f"{target_widget.to_kelvin(source_device.temperature)}K")
+                
+            elif sync_type == 'temperature':
+                # Sync only temperature
+                target_device.temperature = source_device.temperature
+                target_widget.temp_slider.setValue(source_device.temperature)
+                target_widget.temp_label.setText(f"{target_widget.to_kelvin(source_device.temperature)}K")
+                
+            elif sync_type == 'brightness':
+                # Sync only brightness
+                target_device.brightness = source_device.brightness
+                target_widget.brightness_slider.setValue(max(1, source_device.brightness))
+                target_widget.brightness_label.setText(f"{source_device.brightness}%")
+            
+            # Update button style and send to device
+            target_widget.update_power_button_style()
+            target_widget.update_device()
+        
+        # Update master button style
+        controller.update_master_button_style()
 
 
 class KeyLightController(QMainWindow):
@@ -650,10 +787,10 @@ class KeyLightController(QMainWindow):
         main_layout.addWidget(self.scroll_area)
         
     def setup_master_controls(self):
-        """Setup master control panel with 30% smaller buttons"""
+        """Setup master control panel with power and sync controls"""
         self.master_panel = QFrame()
         self.master_panel.setObjectName("MasterPanel")
-        self.master_panel.setFixedHeight(60)
+        self.master_panel.setFixedHeight(70)
         
         master_layout = QHBoxLayout(self.master_panel)
         master_layout.setContentsMargins(16, 8, 16, 8)
@@ -667,6 +804,72 @@ class KeyLightController(QMainWindow):
         self.master_power_button.clicked.connect(self.toggle_all_lights)
         
         master_layout.addWidget(self.master_power_button)
+        
+        # Sync reveal button
+        self.sync_reveal_button = QPushButton("🔗")
+        self.sync_reveal_button.setObjectName("syncRevealButton")
+        self.sync_reveal_button.setFixedSize(25, 25)
+        self.sync_reveal_button.setToolTip("Show sync controls")
+        self.sync_reveal_button.clicked.connect(self.toggle_sync_controls)
+        master_layout.addWidget(self.sync_reveal_button)
+        
+        # Hidden sync controls container
+        self.sync_container = QWidget()
+        self.sync_container.setVisible(False)
+        sync_layout = QHBoxLayout(self.sync_container)
+        sync_layout.setContentsMargins(0, 0, 0, 0)
+        sync_layout.setSpacing(8)
+        
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.VLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        separator.setObjectName("separator")
+        sync_layout.addWidget(separator)
+        
+        # Temperature sync toggle button
+        self.temp_sync_button = QPushButton("🌡")
+        self.temp_sync_button.setCheckable(True)
+        self.temp_sync_button.setObjectName("syncButton")
+        self.temp_sync_button.setFixedSize(28, 28)
+        self.temp_sync_button.setToolTip("Toggle temperature sync (Right-click for one-time sync)")
+        self.temp_sync_button.clicked.connect(self.toggle_temp_sync)
+        self.temp_sync_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.temp_sync_button.customContextMenuRequested.connect(lambda: self.sync_temperature_once())
+        sync_layout.addWidget(self.temp_sync_button)
+        
+        # Brightness sync toggle button
+        self.brightness_sync_button = QPushButton("☀")
+        self.brightness_sync_button.setCheckable(True)
+        self.brightness_sync_button.setObjectName("syncButton")
+        self.brightness_sync_button.setFixedSize(28, 28)
+        self.brightness_sync_button.setToolTip("Toggle brightness sync (Right-click for one-time sync)")
+        self.brightness_sync_button.clicked.connect(self.toggle_brightness_sync)
+        self.brightness_sync_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.brightness_sync_button.customContextMenuRequested.connect(lambda: self.sync_brightness_once())
+        sync_layout.addWidget(self.brightness_sync_button)
+        
+        # Sync all toggle button
+        self.sync_all_button = QPushButton("⚡")
+        self.sync_all_button.setCheckable(True)
+        self.sync_all_button.setObjectName("syncButton")
+        self.sync_all_button.setFixedSize(28, 28)
+        self.sync_all_button.setToolTip("Toggle all sync (Right-click for one-time sync)")
+        self.sync_all_button.clicked.connect(self.toggle_all_sync)
+        self.sync_all_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.sync_all_button.customContextMenuRequested.connect(lambda: self.sync_all_once())
+        sync_layout.addWidget(self.sync_all_button)
+        
+        # Initialize sync states from config
+        self.load_sync_settings()
+        
+        # Sync throttling
+        self.sync_timer = QTimer()
+        self.sync_timer.timeout.connect(self.process_pending_sync)
+        self.sync_timer.setInterval(300)  # 300ms throttle for sync operations
+        self.pending_sync_updates = {}
+        
+        master_layout.addWidget(self.sync_container)
         master_layout.addStretch()
         
     def toggle_all_lights(self):
@@ -684,6 +887,243 @@ class KeyLightController(QMainWindow):
             widget.update_device()
             
         self.update_master_button_style()
+    
+    def toggle_sync_controls(self):
+        """Toggle visibility of sync controls"""
+        is_visible = self.sync_container.isVisible()
+        self.sync_container.setVisible(not is_visible)
+        
+        # Update button appearance and tooltip
+        if not is_visible:
+            self.sync_reveal_button.setText("⛓️‍💥")
+            self.sync_reveal_button.setToolTip("Hide sync controls")
+        else:
+            self.sync_reveal_button.setText("🔗")
+            self.sync_reveal_button.setToolTip("Show sync controls")
+        
+        # Save visibility state
+        self.save_sync_settings()
+    
+    def load_sync_settings(self):
+        """Load sync settings from config"""
+        self.temp_sync_enabled = self.device_config.get_app_setting('temp_sync_enabled', False)
+        self.brightness_sync_enabled = self.device_config.get_app_setting('brightness_sync_enabled', False)
+        self.all_sync_enabled = self.device_config.get_app_setting('all_sync_enabled', False)
+        sync_controls_visible = self.device_config.get_app_setting('sync_controls_visible', False)
+        
+        # Apply loaded states to UI
+        self.temp_sync_button.setChecked(self.temp_sync_enabled)
+        self.brightness_sync_button.setChecked(self.brightness_sync_enabled)
+        self.sync_all_button.setChecked(self.all_sync_enabled)
+        self.sync_container.setVisible(sync_controls_visible)
+        
+        # Update sync reveal button appearance
+        if sync_controls_visible:
+            self.sync_reveal_button.setText("⛓️‍💥")
+            self.sync_reveal_button.setToolTip("Hide sync controls")
+        else:
+            self.sync_reveal_button.setText("🔗")
+            self.sync_reveal_button.setToolTip("Show sync controls")
+    
+    def save_sync_settings(self):
+        """Save sync settings to config"""
+        self.device_config.set_app_setting('temp_sync_enabled', self.temp_sync_enabled)
+        self.device_config.set_app_setting('brightness_sync_enabled', self.brightness_sync_enabled)
+        self.device_config.set_app_setting('all_sync_enabled', self.all_sync_enabled)
+        self.device_config.set_app_setting('sync_controls_visible', self.sync_container.isVisible())
+    
+    def toggle_temp_sync(self):
+        """Toggle temperature synchronization mode"""
+        self.temp_sync_enabled = self.temp_sync_button.isChecked()
+        
+        # If all sync is enabled, disable it when individual sync is toggled
+        if self.all_sync_enabled and self.temp_sync_enabled:
+            self.all_sync_enabled = False
+            self.sync_all_button.setChecked(False)
+        
+        # Save settings
+        self.save_sync_settings()
+    
+    def toggle_brightness_sync(self):
+        """Toggle brightness synchronization mode"""
+        self.brightness_sync_enabled = self.brightness_sync_button.isChecked()
+        
+        # If all sync is enabled, disable it when individual sync is toggled
+        if self.all_sync_enabled and self.brightness_sync_enabled:
+            self.all_sync_enabled = False
+            self.sync_all_button.setChecked(False)
+        
+        # Save settings
+        self.save_sync_settings()
+    
+    def toggle_all_sync(self):
+        """Toggle all settings synchronization mode"""
+        self.all_sync_enabled = self.sync_all_button.isChecked()
+        
+        # When all sync is enabled, disable individual syncs
+        if self.all_sync_enabled:
+            self.temp_sync_enabled = False
+            self.brightness_sync_enabled = False
+            self.temp_sync_button.setChecked(False)
+            self.brightness_sync_button.setChecked(False)
+        
+        # Save settings
+        self.save_sync_settings()
+    
+    def sync_temperature_once(self):
+        """One-time temperature sync from first device to all others"""
+        if len(self.keylights) < 2:
+            return
+        
+        reference_temp = self.keylights[0].temperature
+        for i, widget in enumerate(self.keylight_widgets):
+            if i == 0:
+                continue
+            # Skip locked devices
+            if widget.is_locked:
+                continue
+            widget.keylight.temperature = reference_temp
+            widget.temp_slider.setValue(reference_temp)
+            widget.temp_label.setText(f"{widget.to_kelvin(reference_temp)}K")
+            widget.update_power_button_style()
+            widget.update_device()
+        self.update_master_button_style()
+    
+    def sync_brightness_once(self):
+        """One-time brightness sync from first device to all others"""
+        if len(self.keylights) < 2:
+            return
+        
+        reference_brightness = self.keylights[0].brightness
+        for i, widget in enumerate(self.keylight_widgets):
+            if i == 0:
+                continue
+            # Skip locked devices
+            if widget.is_locked:
+                continue
+            widget.keylight.brightness = reference_brightness
+            widget.brightness_slider.setValue(max(1, reference_brightness))
+            widget.brightness_label.setText(f"{reference_brightness}%")
+            widget.update_power_button_style()
+            widget.update_device()
+        self.update_master_button_style()
+    
+    def sync_all_once(self):
+        """One-time sync of all settings from first device to all others"""
+        if len(self.keylights) < 2:
+            return
+        
+        reference_device = self.keylights[0]
+        for i, widget in enumerate(self.keylight_widgets):
+            if i == 0:
+                continue
+            
+            # Skip locked devices
+            if widget.is_locked:
+                continue
+            
+            widget.keylight.on = reference_device.on
+            widget.keylight.brightness = reference_device.brightness
+            widget.keylight.temperature = reference_device.temperature
+            
+            widget.power_button.setChecked(reference_device.on)
+            widget.brightness_slider.setValue(max(1, reference_device.brightness))
+            widget.brightness_label.setText(f"{reference_device.brightness}%")
+            widget.temp_slider.setValue(reference_device.temperature)
+            widget.temp_label.setText(f"{widget.to_kelvin(reference_device.temperature)}K")
+            widget.update_power_button_style()
+            widget.update_device()
+        
+        self.update_master_button_state()
+        self.update_master_button_style()
+    
+    def propagate_sync_changes(self, source_widget, changed_attribute, value):
+        """Schedule throttled sync changes to prevent network flooding"""
+        if len(self.keylights) < 2:
+            return
+        
+        # Check if sync is enabled for this attribute
+        should_sync = False
+        if self.all_sync_enabled:
+            should_sync = True
+        elif self.temp_sync_enabled and changed_attribute == 'temperature':
+            should_sync = True
+        elif self.brightness_sync_enabled and changed_attribute == 'brightness':
+            should_sync = True
+        
+        if not should_sync:
+            return
+        
+        # Find source widget index
+        source_index = -1
+        for i, widget in enumerate(self.keylight_widgets):
+            if widget == source_widget:
+                source_index = i
+                break
+        
+        if source_index == -1:
+            return
+        
+        # Store pending updates (only UI updates immediately, device updates are throttled)
+        for i, widget in enumerate(self.keylight_widgets):
+            if i == source_index:  # Skip source widget
+                continue
+            
+            # Skip locked devices
+            if widget.is_locked:
+                continue
+            
+            # Immediate UI updates (no network calls)
+            if self.all_sync_enabled:
+                if changed_attribute == 'temperature':
+                    widget.keylight.temperature = value
+                    widget.temp_slider.setValue(value)
+                    widget.temp_label.setText(f"{widget.to_kelvin(value)}K")
+                elif changed_attribute == 'brightness':
+                    widget.keylight.brightness = value
+                    widget.brightness_slider.setValue(max(1, value))
+                    widget.brightness_label.setText(f"{value}%")
+                elif changed_attribute == 'power':
+                    widget.keylight.on = value
+                    widget.power_button.setChecked(value)
+                
+                widget.update_power_button_style()
+                # Store for throttled device update
+                self.pending_sync_updates[i] = widget
+                
+            elif self.temp_sync_enabled and changed_attribute == 'temperature':
+                widget.keylight.temperature = value
+                widget.temp_slider.setValue(value)
+                widget.temp_label.setText(f"{widget.to_kelvin(value)}K")
+                widget.update_power_button_style()
+                self.pending_sync_updates[i] = widget
+                
+            elif self.brightness_sync_enabled and changed_attribute == 'brightness':
+                widget.keylight.brightness = value
+                widget.brightness_slider.setValue(max(1, value))
+                widget.brightness_label.setText(f"{value}%")
+                widget.update_power_button_style()
+                self.pending_sync_updates[i] = widget
+        
+        # Start throttled timer for device updates
+        if self.pending_sync_updates and not self.sync_timer.isActive():
+            self.sync_timer.start()
+        
+        self.update_master_button_style()
+    
+    def process_pending_sync(self):
+        """Process pending sync updates to devices (throttled)"""
+        if not self.pending_sync_updates:
+            self.sync_timer.stop()
+            return
+        
+        # Send updates to devices
+        for widget in self.pending_sync_updates.values():
+            widget.update_device()
+        
+        # Clear pending updates
+        self.pending_sync_updates.clear()
+        self.sync_timer.stop()
         
     def update_master_button_style(self):
         """Update master power button appearance with gradient of all device colors"""
@@ -850,6 +1290,63 @@ class KeyLightController(QMainWindow):
             color: #ffffff;
             font-size: 14px;
             font-weight: 500;
+        }
+        
+        QFrame#separator {
+            color: #555555;
+            background-color: #555555;
+            max-width: 1px;
+        }
+        
+        QPushButton#syncRevealButton {
+            background-color: #3a3a3a;
+            border: 1px solid #555555;
+            border-radius: 12px;
+            color: #888888;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        QPushButton#syncRevealButton:hover {
+            background-color: #4a4a4a;
+            border: 1px solid #666666;
+            color: #cccccc;
+        }
+        
+        QPushButton#syncRevealButton:pressed {
+            background-color: #00E5FF;
+            color: #000000;
+            border: 1px solid #00C4E5;
+        }
+        
+        QPushButton#syncButton {
+            background-color: transparent;
+            border: 1px solid #555555;
+            border-radius: 6px;
+            color: #cccccc;
+            font-size: 14px;
+        }
+        
+        QPushButton#syncButton:hover {
+            background-color: #4a4a4a;
+            border: 1px solid #666666;
+        }
+        
+        QPushButton#syncButton:pressed {
+            background-color: #00E5FF;
+            color: #000000;
+            border: 1px solid #00C4E5;
+        }
+        
+        QPushButton#syncButton:checked {
+            background-color: #00E5FF;
+            color: #000000;
+            border: 2px solid #00C4E5;
+        }
+        
+        QPushButton#syncButton:checked:hover {
+            background-color: #00D4FF;
+            border: 2px solid #00B4D5;
         }
         
         QLabel#deviceName {

@@ -126,6 +126,48 @@ class DeviceConfig:
         device_data = self.config_data.get('devices', {}).get(mac_address, {})
         return 'custom_label' in device_data
     
+    def get_lock_state(self, mac_address: str) -> bool:
+        """Get lock state for device, returns False if not set"""
+        if not mac_address:
+            return False
+        
+        device_data = self.config_data.get('devices', {}).get(mac_address, {})
+        return device_data.get('is_locked', False)
+    
+    def set_lock_state(self, mac_address: str, is_locked: bool) -> bool:
+        """Set lock state for device"""
+        if not mac_address:
+            return False
+        
+        # Initialize devices dict if it doesn't exist
+        if 'devices' not in self.config_data:
+            self.config_data['devices'] = {}
+        
+        # Initialize device data if it doesn't exist
+        if mac_address not in self.config_data['devices']:
+            self.config_data['devices'][mac_address] = {
+                'last_seen': self._get_timestamp()
+            }
+        
+        # Set lock state
+        self.config_data['devices'][mac_address]['is_locked'] = is_locked
+        self.config_data['devices'][mac_address]['last_seen'] = self._get_timestamp()
+        
+        return self._save_config()
+    
+    def get_app_setting(self, setting_name: str, default_value=None):
+        """Get application-level setting"""
+        app_settings = self.config_data.get('app_settings', {})
+        return app_settings.get(setting_name, default_value)
+    
+    def set_app_setting(self, setting_name: str, value) -> bool:
+        """Set application-level setting"""
+        if 'app_settings' not in self.config_data:
+            self.config_data['app_settings'] = {}
+        
+        self.config_data['app_settings'][setting_name] = value
+        return self._save_config()
+    
     def get_all_devices(self) -> Dict[str, Dict]:
         """Get all configured devices"""
         return self.config_data.get('devices', {})
