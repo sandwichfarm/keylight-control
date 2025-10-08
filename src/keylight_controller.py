@@ -32,7 +32,6 @@ from ui.widgets.master_widget import MasterDeviceWidget
 from ui.widgets.jump_slider import JumpSlider
 from ui.widgets.rename_dialog import RenameDeviceDialog
 from ui.widgets.keylight_widget import KeyLightWidget
-from core.service import KeyLightService
 
 # Check Python version
 if sys.version_info < (3, 8):
