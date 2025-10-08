@@ -69,7 +69,7 @@ except ImportError:
 
  
 
-class MasterDeviceWidget(QFrame):
+class _MasterDeviceWidgetOld(QFrame):
     """Master control widget that looks like a device but controls all devices"""
     
     def __init__(self, controller, parent=None):
