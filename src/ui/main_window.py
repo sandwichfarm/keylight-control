@@ -489,12 +489,13 @@ class KeyLightController(QMainWindow):
         )
 
     def update_master_button_state(self):
+        """Master button is ON if any device is ON; OFF only if all are OFF."""
         if not self.keylights:
             self.master_power_button.setChecked(False)
             self.update_master_button_style()
             return
-        all_on = all(kl.on for kl in self.keylights)
-        self.master_power_button.setChecked(all_on)
+        any_on = any(kl.on for kl in self.keylights)
+        self.master_power_button.setChecked(any_on)
         self.update_master_button_style()
 
     def apply_blur_effect(self):
