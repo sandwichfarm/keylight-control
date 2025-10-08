@@ -17,6 +17,9 @@ import time
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 
+# Import local modules
+from config import DeviceConfig
+
 # Check Python version
 if sys.version_info < (3, 8):
     print("Error: Python 3.8 or higher is required")
@@ -38,10 +41,11 @@ try:
     from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QSlider, QLabel, QPushButton, QFrame, QSystemTrayIcon, QMenu,
-        QScrollArea, QSizePolicy
+        QScrollArea, QSizePolicy, QDialog, QLineEdit, QDialogButtonBox
     )
-    from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject, QSize, QElapsedTimer
-    from PySide6.QtGui import QIcon, QPalette, QColor, QAction, QPixmap, QPainter, QBrush, QPen, QKeySequence, QShortcut
+    from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject, QSize, QElapsedTimer, QPropertyAnimation, QEasingCurve
+    from PySide6.QtGui import QIcon, QPalette, QColor, QAction, QPixmap, QPainter, QBrush, QPen, QKeySequence, QShortcut, QCursor
+    from PySide6.QtWidgets import QGraphicsBlurEffect
 except ImportError:
     print("Error: PySide6 is required. Install with: pip install PySide6")
     print("Note: On some systems you may need to install qt6-base first")
@@ -58,12 +62,89 @@ class JumpSlider(QSlider):
         super().mousePressEvent(event)
 
 
+class RenameDeviceDialog(QDialog):
+    """Simple, functional dialog for renaming devices"""
+    
+    def __init__(self, current_name: str, original_name: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Rename Device")
+        self.setModal(True)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Input field
+        self.name_input = QLineEdit(current_name)
+        self.name_input.selectAll()
+        layout.addWidget(self.name_input)
+        
+        # Clean buttons without icons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        
+        # Remove icons from buttons
+        ok_button = button_box.button(QDialogButtonBox.Ok)
+        cancel_button = button_box.button(QDialogButtonBox.Cancel)
+        ok_button.setText("Save")
+        cancel_button.setText("Cancel")
+        ok_button.setIcon(QIcon())  # Remove icon
+        cancel_button.setIcon(QIcon())  # Remove icon
+        
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        # Connect enter key
+        self.name_input.returnPressed.connect(self.accept)
+        
+        # Focus and style
+        self.name_input.setFocus()
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2a2a2a;
+                color: #ffffff;
+            }
+            QLineEdit {
+                background-color: #3a3a3a;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 8px;
+                color: #ffffff;
+                font-size: 14px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #00E5FF;
+            }
+            QPushButton {
+                background-color: #3a3a3a;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 6px 12px;
+                color: #ffffff;
+                min-width: 60px;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+            }
+            QPushButton:default {
+                background-color: #00E5FF;
+                color: #000000;
+                font-weight: bold;
+            }
+        """)
+    
+    def get_name(self) -> str:
+        """Get the entered name"""
+        return self.name_input.text().strip()
+
+
 @dataclass
 class KeyLight:
     """Represents a Key Light device"""
     name: str
     ip: str
     port: int = 9123
+    mac_address: str = ""
     on: bool = False
     brightness: int = 50
     temperature: int = 200  # 143-344 range (7000K-2900K)
@@ -72,6 +153,7 @@ class KeyLight:
 class KeyLightDiscovery(QObject):
     """Discovers Key Lights on the network using mDNS"""
     device_found = Signal(dict)
+    mac_fetch_requested = Signal(dict)
     
     def __init__(self):
         super().__init__()
@@ -97,7 +179,49 @@ class KeyLightDiscovery(QObject):
                     'ip': '.'.join(map(str, info.addresses[0])),
                     'port': info.port
                 }
-                self.device_found.emit(device_info)
+                # Request MAC address fetch from main thread
+                self.mac_fetch_requested.emit(device_info)
+    
+    async def _fetch_mac_address(self, device_info):
+        """Fetch MAC address from device and emit the complete device info"""
+        mac_address = await self._get_device_mac_address(device_info['ip'], device_info['port'])
+        device_info['mac_address'] = mac_address
+        self.device_found.emit(device_info)
+    
+    async def _get_device_mac_address(self, ip: str, port: int) -> str:
+        """Get MAC address from device API or ARP table"""
+        # First try to get it from the device's accessory-info endpoint
+        try:
+            url = f"http://{ip}:{port}/elgato/accessory-info"
+            timeout = aiohttp.ClientTimeout(total=3)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # Look for MAC address in various possible fields
+                        mac = data.get('macAddress') or data.get('mac') or data.get('serialNumber')
+                        if mac:
+                            return mac.upper().replace(':', '').replace('-', '')
+        except Exception:
+            pass
+        
+        # Fallback: try to get MAC from ARP table using system command
+        try:
+            import subprocess
+            result = subprocess.run(['arp', '-n', ip], capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                for line in lines:
+                    if ip in line and 'incomplete' not in line.lower():
+                        parts = line.split()
+                        for part in parts:
+                            if ':' in part and len(part.replace(':', '')) == 12:
+                                return part.upper().replace(':', '')
+        except Exception:
+            pass
+        
+        # Last resort: use IP address as a fallback identifier
+        return f"IP_{ip.replace('.', '_')}"
                 
     def stop_discovery(self):
         """Stop discovery and cleanup"""
@@ -108,6 +232,7 @@ class KeyLightDiscovery(QObject):
 
 class KeyLightWidget(QFrame):
     """Widget for controlling a single Key Light"""
+    power_state_changed = Signal()
     
     def __init__(self, keylight: KeyLight, parent=None):
         super().__init__(parent)
@@ -147,6 +272,7 @@ class KeyLightWidget(QFrame):
         self.menu_button = QPushButton("⋮")
         self.menu_button.setObjectName("menuButton")
         self.menu_button.setFixedSize(30, 30)
+        self.menu_button.clicked.connect(self.show_device_menu)
         
         header_layout.addWidget(self.power_button)
         header_layout.addWidget(self.name_label)
@@ -236,6 +362,7 @@ class KeyLightWidget(QFrame):
         self.keylight.on = self.power_button.isChecked()
         self.update_device()
         self.update_power_button_style()
+        self.power_state_changed.emit()
         
     def on_brightness_changed(self, value):
         """Handle brightness slider change"""
@@ -244,12 +371,26 @@ class KeyLightWidget(QFrame):
         self.schedule_update()
         self.update_power_button_style()
         
+        # Update master button to reflect new brightness
+        controller = self.parent()
+        while controller and not isinstance(controller, KeyLightController):
+            controller = controller.parent()
+        if controller:
+            controller.update_master_button_style()
+        
     def on_temperature_changed(self, value):
         """Handle temperature slider change"""
         self.keylight.temperature = value
         self.temp_label.setText(f"{self.to_kelvin(value)}K")
         self.schedule_update()
         self.update_power_button_style()
+        
+        # Update master button to reflect new temperature/color
+        controller = self.parent()
+        while controller and not isinstance(controller, KeyLightController):
+            controller = controller.parent()
+        if controller:
+            controller.update_master_button_style()
         
     def schedule_update(self):
         """Schedule an update with throttling"""
@@ -351,8 +492,98 @@ class KeyLightWidget(QFrame):
                         self.brightness_slider.setValue(max(1, self.keylight.brightness))  # Ensure min 1%
                         self.temp_slider.setValue(self.keylight.temperature)
                         self.update_power_button_style()
+                        self.power_state_changed.emit()
         except Exception as e:
             print(f"Error fetching state from {self.keylight.name}: {e}")
+    
+    def show_device_menu(self):
+        """Show the device context menu"""
+        menu = QMenu(self)
+        
+        # Get controller reference to access device config
+        controller = self.parent()
+        while controller and not isinstance(controller, KeyLightController):
+            controller = controller.parent()
+        
+        if not controller:
+            return
+        
+        # Rename device action
+        rename_action = QAction('Rename Device', self)
+        rename_action.triggered.connect(lambda: self.rename_device(controller))
+        menu.addAction(rename_action)
+        
+        # Reset to default action (only enabled if has custom label)
+        reset_action = QAction('Reset to Default', self)
+        reset_action.triggered.connect(lambda: self.reset_label(controller))
+        has_custom = controller.device_config.has_custom_label(self.keylight.mac_address)
+        reset_action.setEnabled(has_custom)
+        menu.addAction(reset_action)
+        
+        # Apply dark theme to menu
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2a2a2a;
+                border: 1px solid #555555;
+                color: #ffffff;
+            }
+            QMenu::item {
+                padding: 6px 12px;
+            }
+            QMenu::item:selected {
+                background-color: #00E5FF;
+            }
+            QMenu::item:disabled {
+                color: #888888;
+            }
+        """)
+        
+        # Show menu at cursor position
+        menu.exec_(QCursor.pos())
+    
+    def rename_device(self, controller):
+        """Show rename dialog and handle the result"""
+        original_name = self.keylight.name
+        current_label = controller.device_config.get_label(
+            self.keylight.mac_address, 
+            self.keylight.name
+        )
+        
+        # Prepare the main window for dialog
+        controller.prepare_for_dialog()
+        
+        try:
+            dialog = RenameDeviceDialog(current_label, original_name, controller)
+            result = dialog.exec()
+            
+            if result == QDialog.Accepted:
+                new_name = dialog.get_name()
+                if new_name and new_name != original_name:
+                    # Save the custom label
+                    success = controller.device_config.set_label(
+                        self.keylight.mac_address,
+                        original_name,
+                        new_name,
+                        self.keylight.ip
+                    )
+                    if success:
+                        # Update the display name
+                        self.name_label.setText(new_name)
+                    else:
+                        print(f"Failed to save custom label for {original_name}")
+        finally:
+            # Always cleanup when dialog closes
+            controller.cleanup_after_dialog()
+    
+    def reset_label(self, controller):
+        """Reset device to original name"""
+        original_name = self.keylight.name
+        success = controller.device_config.remove_label(self.keylight.mac_address)
+        if success:
+            # Update the display name back to original
+            self.name_label.setText(original_name)
+        else:
+            print(f"Failed to reset label for {original_name}")
 
 
 class KeyLightController(QMainWindow):
@@ -362,13 +593,15 @@ class KeyLightController(QMainWindow):
         super().__init__()
         self.keylights = []
         self.keylight_widgets = []
+        self.device_config = DeviceConfig()
         self.discovery = KeyLightDiscovery()
         self.setup_ui()
         self.apply_dark_theme()
         self.setup_system_tray()
         
-        # Connect discovery signal
+        # Connect discovery signals
         self.discovery.device_found.connect(self.add_keylight)
+        self.discovery.mac_fetch_requested.connect(self.fetch_device_mac)
         
         # Start discovery
         self.discovery.start_discovery()
@@ -396,6 +629,10 @@ class KeyLightController(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
+        # Master control panel
+        self.setup_master_controls()
+        main_layout.addWidget(self.master_panel)
+        
         # Scroll area for devices
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -411,6 +648,162 @@ class KeyLightController(QMainWindow):
         
         self.scroll_area.setWidget(self.devices_container)
         main_layout.addWidget(self.scroll_area)
+        
+    def setup_master_controls(self):
+        """Setup master control panel with 30% smaller buttons"""
+        self.master_panel = QFrame()
+        self.master_panel.setObjectName("MasterPanel")
+        self.master_panel.setFixedHeight(60)
+        
+        master_layout = QHBoxLayout(self.master_panel)
+        master_layout.setContentsMargins(16, 8, 16, 8)
+        master_layout.setSpacing(12)
+        
+        # Master power button (30% smaller than device buttons: 36px -> 25px)
+        self.master_power_button = QPushButton("⏻")
+        self.master_power_button.setCheckable(True)
+        self.master_power_button.setObjectName("masterPowerButton")
+        self.master_power_button.setFixedSize(25, 25)
+        self.master_power_button.clicked.connect(self.toggle_all_lights)
+        
+        master_layout.addWidget(self.master_power_button)
+        master_layout.addStretch()
+        
+    def toggle_all_lights(self):
+        """Toggle power state of all connected lights"""
+        if not self.keylights:
+            return
+            
+        master_state = self.master_power_button.isChecked()
+        
+        # Update all device widgets
+        for widget in self.keylight_widgets:
+            widget.keylight.on = master_state
+            widget.power_button.setChecked(master_state)
+            widget.update_power_button_style()
+            widget.update_device()
+            
+        self.update_master_button_style()
+        
+    def update_master_button_style(self):
+        """Update master power button appearance with gradient of all device colors"""
+        if self.master_power_button.isChecked() and self.keylights:
+            # Get colors from all devices
+            device_colors = []
+            for widget in self.keylight_widgets:
+                if widget.keylight.on:
+                    # Get the color from each device
+                    r, g, b = widget.to_slider_color(widget.keylight.temperature)
+                    alpha = widget.keylight.brightness / 100.0
+                    device_colors.append((r, g, b, alpha))
+            
+            if device_colors:
+                if len(device_colors) == 1:
+                    # Single device - use its color
+                    r, g, b, alpha = device_colors[0]
+                    color = f"rgba({r}, {g}, {b}, {alpha})"
+                    self.master_power_button.setStyleSheet(f"""
+                        QPushButton#masterPowerButton {{
+                            background-color: {color};
+                            border: 2px solid rgba({r}, {g}, {b}, 1.0);
+                            border-radius: 12px;
+                            font-size: 20px;
+                            color: #ffffff;
+                            padding-bottom: 1px;
+                        }}
+                    """)
+                else:
+                    # Multiple devices - create gradient
+                    gradient_stops = []
+                    for i, (r, g, b, alpha) in enumerate(device_colors):
+                        position = i / (len(device_colors) - 1)
+                        gradient_stops.append(f"stop:{position:.2f} rgba({r}, {g}, {b}, {alpha})")
+                    
+                    gradient = "qlineargradient(x1:0, y1:0, x2:1, y2:0, " + ", ".join(gradient_stops) + ")"
+                    
+                    # Average color for border
+                    avg_r = sum(r for r, g, b, a in device_colors) // len(device_colors)
+                    avg_g = sum(g for r, g, b, a in device_colors) // len(device_colors)
+                    avg_b = sum(b for r, g, b, a in device_colors) // len(device_colors)
+                    
+                    self.master_power_button.setStyleSheet(f"""
+                        QPushButton#masterPowerButton {{
+                            background: {gradient};
+                            border: 2px solid rgb({avg_r}, {avg_g}, {avg_b});
+                            border-radius: 12px;
+                            font-size: 20px;
+                            color: #ffffff;
+                            padding-bottom: 1px;
+                        }}
+                    """)
+            else:
+                # No devices on - fallback to default
+                self._apply_default_master_style()
+        else:
+            self._apply_default_master_style()
+    
+    def _apply_default_master_style(self):
+        """Apply default master button style when off or no devices"""
+        self.master_power_button.setStyleSheet("""
+            QPushButton#masterPowerButton {
+                background-color: transparent;
+                border: 2px solid #555;
+                border-radius: 12px;
+                color: #555;
+                font-size: 20px;
+                padding-bottom: 1px;
+            }
+        """)
+    
+    def update_master_button_state(self):
+        """Update master button state based on all device states"""
+        if not self.keylights:
+            self.master_power_button.setChecked(False)
+            self.update_master_button_style()
+            return
+            
+        # Check if all lights are on
+        all_on = all(kl.on for kl in self.keylights)
+        self.master_power_button.setChecked(all_on)
+        self.update_master_button_style()
+    
+    def apply_blur_effect(self):
+        """Apply blur effect to the application content"""
+        # Create blur effect for the entire central widget
+        blur_effect = QGraphicsBlurEffect()
+        blur_effect.setBlurRadius(8)
+        
+        # Apply blur to the central widget (contains all app content)
+        self.centralWidget().setGraphicsEffect(blur_effect)
+    
+    def remove_blur_effect(self):
+        """Remove blur effect from the application content"""
+        self.centralWidget().setGraphicsEffect(None)
+    
+    def prepare_for_dialog(self):
+        """Prepare main window for dialog - apply blur and ensure adequate size"""
+        self.apply_blur_effect()
+        
+        # Store original size in case we need to restore it
+        self.original_size = self.size()
+        
+        # Dialog is 350x140, ensure window is large enough
+        dialog_height = 140
+        current_height = self.height()
+        
+        # If current window is too small for dialog, grow it
+        if current_height < dialog_height + 100:  # Add buffer for dialog positioning
+            new_height = dialog_height + 200
+            self.resize(self.width(), new_height)
+    
+    def cleanup_after_dialog(self):
+        """Cleanup after dialog closes - remove blur and restore size"""
+        self.remove_blur_effect()
+        
+        # Restore original size if we have it
+        if hasattr(self, 'original_size'):
+            self.resize(self.original_size)
+            delattr(self, 'original_size')
         
     def apply_dark_theme(self):
         """Apply dark theme similar to professional control center apps"""
@@ -444,6 +837,19 @@ class KeyLightController(QMainWindow):
         
         QFrame#KeyLightWidget::hover{
             border: 2px solid #aaaaaa;
+        }
+        
+        QFrame#MasterPanel {
+            background-color: #2a2a2a;
+            border-radius: 12px;
+            border: 1px solid #3a3a3a;
+            margin: 8px;
+        }
+        
+        QLabel#masterLabel {
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: 500;
         }
         
         QLabel#deviceName {
@@ -582,6 +988,19 @@ class KeyLightController(QMainWindow):
                 self.show()
                 self.raise_()
                 self.activateWindow()
+    
+    def fetch_device_mac(self, device_info):
+        """Handle MAC address fetch request from discovery thread"""
+        asyncio.create_task(self._fetch_and_add_device(device_info))
+    
+    async def _fetch_and_add_device(self, device_info):
+        """Fetch MAC address and add device"""
+        mac_address = await self.discovery._get_device_mac_address(
+            device_info['ip'], 
+            device_info['port']
+        )
+        device_info['mac_address'] = mac_address
+        self.discovery.device_found.emit(device_info)
                 
     def add_keylight(self, device_info):
         """Add a discovered Key Light"""
@@ -594,12 +1013,19 @@ class KeyLightController(QMainWindow):
         keylight = KeyLight(
             name=device_info['name'],
             ip=device_info['ip'],
-            port=device_info.get('port', 9123)
+            port=device_info.get('port', 9123),
+            mac_address=device_info.get('mac_address', '')
         )
         self.keylights.append(keylight)
         
         # Create widget
         widget = KeyLightWidget(keylight, self)
+        widget.power_state_changed.connect(self.update_master_button_state)
+        
+        # Apply custom label if it exists
+        custom_label = self.device_config.get_label(keylight.mac_address, keylight.name)
+        widget.name_label.setText(custom_label)
+        
         self.keylight_widgets.append(widget)
         
         # Add to layout
@@ -608,21 +1034,29 @@ class KeyLightController(QMainWindow):
         # Adjust window height dynamically
         self.adjust_window_size()
         
+        # Update master button state
+        self.update_master_button_state()
+        
     def adjust_window_size(self):
         """Dynamically adjust window size based on number of lights"""
         num_lights = len(self.keylights)
         
         if num_lights == 0:
-            self.setFixedHeight(200)
+            # Show master panel even with no devices
+            master_panel_height = 60
+            title_bar = 35
+            margins = 16
+            self.setFixedHeight(master_panel_height + title_bar + margins + 50)  # Extra space for empty state
             return
         
         # Calculate needed height (widgets + spacing + margins)
-        # widget_height * num_lights + spacing between widgets + top/bottom margins + title bar
+        # master panel + widget_height * num_lights + spacing between widgets + top/bottom margins + title bar
+        master_panel_height = 60  # Height of master control panel
         spacing_between = (num_lights - 1) * 8 if num_lights > 1 else 0
         margins = 16  # 8px top + 8px bottom
         title_bar = 35  # Approximate title bar height
         
-        needed_height = (num_lights * self.widget_height) + spacing_between + margins + title_bar
+        needed_height = master_panel_height + (num_lights * self.widget_height) + spacing_between + margins + title_bar
         
         # Cap at maximum height
         new_height = min(needed_height, self.max_height)
