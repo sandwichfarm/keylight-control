@@ -28,6 +28,7 @@ from utils.color_utils import (
     slider_color_for_temp as util_slider_color_for_temp,
     percent_to_hex_alpha as util_percent_to_hex_alpha,
 )
+from ui.widgets.jump_slider import JumpSlider
 from core.service import KeyLightService
 
 # Check Python version
@@ -62,15 +63,6 @@ except ImportError:
     print("Note: On some systems you may need to install qt6-base first")
     sys.exit(1)
 
-
-
-class JumpSlider(QSlider):
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            new_val = self.minimum() + (self.maximum() - self.minimum()) * event.position().x() / self.width()
-            self.setValue(round(new_val))
-            event.accept()
-        super().mousePressEvent(event)
 
 
 class RenameDeviceDialog(QDialog):
