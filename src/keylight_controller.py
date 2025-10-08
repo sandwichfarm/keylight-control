@@ -16,10 +16,11 @@ import socket
 import time
 import math
 from typing import List, Dict, Optional
-from dataclasses import dataclass
+ 
 
 # Import local modules
 from config import DeviceConfig
+from core.models import KeyLight
 
 # Check Python version
 if sys.version_info < (3, 8):
@@ -140,17 +141,7 @@ class RenameDeviceDialog(QDialog):
         return self.name_input.text().strip()
 
 
-@dataclass
-class KeyLight:
-    """Represents a Key Light device"""
-    name: str
-    ip: str
-    port: int = 9123
-    mac_address: str = ""
-    on: bool = False
-    brightness: int = 50
-    temperature: int = 200  # 143-344 range (7000K-2900K)
-    
+ 
 
 class KeyLightDiscovery(QObject):
     """Discovers Key Lights on the network using mDNS"""
