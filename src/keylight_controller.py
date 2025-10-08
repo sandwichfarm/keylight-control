@@ -14,6 +14,7 @@ import json
 import asyncio
 import socket
 import time
+import math
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 
@@ -41,7 +42,8 @@ try:
     from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QSlider, QLabel, QPushButton, QFrame, QSystemTrayIcon, QMenu,
-        QScrollArea, QSizePolicy, QDialog, QLineEdit, QDialogButtonBox
+        QScrollArea, QSizePolicy, QDialog, QLineEdit, QDialogButtonBox,
+        QCheckBox
     )
     from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject, QSize, QElapsedTimer, QPropertyAnimation, QEasingCurve
     from PySide6.QtGui import QIcon, QPalette, QColor, QAction, QPixmap, QPainter, QBrush, QPen, QKeySequence, QShortcut, QCursor
@@ -230,6 +232,292 @@ class KeyLightDiscovery(QObject):
         self.zeroconf.close()
 
 
+class MasterDeviceWidget(QFrame):
+    """Master control widget that looks like a device but controls all devices"""
+    
+    def __init__(self, controller, parent=None):
+        super().__init__(parent)
+        self.controller = controller
+        self.ignore_locks = True  # Enabled by default
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup the UI to match device style but with master control styling"""
+        self.setObjectName("MasterDeviceWidget")
+        
+        # Main layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(16, 16, 16, 16)  # Match device widgets
+        main_layout.setSpacing(12)  # Match device widgets
+        
+        # Header with power button, device name, and menu button
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Power button (larger than device buttons to stand out) - moved to left
+        self.power_button = QPushButton()
+        self.power_button.setObjectName("masterPowerButton")
+        self.power_button.setCheckable(True)
+        self.power_button.setFixedSize(36, 36)  # Same size as device buttons
+        self.power_button.clicked.connect(self.toggle_all_power)
+        header_layout.addWidget(self.power_button)
+        
+        # Device name
+        device_count = len(self.controller.keylights)
+        self.name_label = QLabel(f"Master ({device_count} devices)")
+        self.name_label.setObjectName("deviceName")
+        header_layout.addWidget(self.name_label)
+        
+        header_layout.addStretch()
+        
+        # Menu button (three dots)
+        self.menu_button = QPushButton("⋮")
+        self.menu_button.setObjectName("menuButton")
+        self.menu_button.setFixedSize(24, 24)
+        self.menu_button.clicked.connect(self.show_master_menu)
+        header_layout.addWidget(self.menu_button)
+        
+        main_layout.addLayout(header_layout)
+        
+        # Brightness control
+        brightness_layout = QHBoxLayout()
+        brightness_layout.setContentsMargins(0, 0, 0, 0)
+        
+        brightness_icon = QLabel("☀")
+        brightness_icon.setObjectName("sliderIcon")
+        brightness_icon.setFixedSize(20, 20)
+        brightness_layout.addWidget(brightness_icon)
+        
+        self.brightness_slider = QSlider(Qt.Horizontal)
+        self.brightness_slider.setObjectName("brightnessSlider")
+        self.brightness_slider.setRange(1, 100)
+        self.brightness_slider.setValue(50)
+        self.brightness_slider.valueChanged.connect(self.brightness_changed)
+        brightness_layout.addWidget(self.brightness_slider)
+        
+        self.brightness_label = QLabel("50%")
+        self.brightness_label.setObjectName("sliderValue")
+        self.brightness_label.setFixedWidth(40)
+        brightness_layout.addWidget(self.brightness_label)
+        
+        main_layout.addLayout(brightness_layout)
+        
+        # Temperature control
+        temp_layout = QHBoxLayout()
+        temp_layout.setContentsMargins(0, 0, 0, 0)
+        
+        temp_icon = QLabel("🌡")
+        temp_icon.setObjectName("sliderIcon")
+        temp_icon.setFixedSize(20, 20)
+        temp_layout.addWidget(temp_icon)
+        
+        self.temp_slider = QSlider(Qt.Horizontal)
+        self.temp_slider.setObjectName("temperatureSlider")
+        self.temp_slider.setRange(143, 344)  # Kelvin range mapped to slider
+        self.temp_slider.setValue(250)
+        self.temp_slider.valueChanged.connect(self.temperature_changed)
+        temp_layout.addWidget(self.temp_slider)
+        
+        self.temp_label = QLabel("5000K")
+        self.temp_label.setObjectName("sliderValue")
+        self.temp_label.setFixedWidth(50)
+        temp_layout.addWidget(self.temp_label)
+        
+        main_layout.addLayout(temp_layout)
+        
+        self.update_power_button_style()
+    
+    def update_device_count(self):
+        """Update the device count in the master label"""
+        device_count = len(self.controller.keylights)
+        self.name_label.setText(f"Master ({device_count} devices)")
+    
+    def toggle_ignore_locks(self):
+        """Toggle ignore locks setting"""
+        self.ignore_locks = not self.ignore_locks
+        # Save setting to config
+        self.controller.device_config.set_app_setting('master_ignore_locks', self.ignore_locks)
+    
+    def show_master_menu(self):
+        """Show the master device context menu"""
+        menu = QMenu(self)
+        
+        # Ignore locks toggle action
+        ignore_locks_text = 'Disable ignore locks' if self.ignore_locks else 'Enable ignore locks'
+        ignore_locks_action = QAction(ignore_locks_text, self)
+        ignore_locks_action.triggered.connect(self.toggle_ignore_locks)
+        menu.addAction(ignore_locks_action)
+        
+        # Apply dark theme to menu (same style as device menus)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2a2a2a;
+                border: 1px solid #555555;
+                color: #ffffff;
+            }
+            QMenu::item {
+                padding: 6px 12px;
+            }
+            QMenu::item:selected {
+                background-color: #00E5FF;
+            }
+            QMenu::item:disabled {
+                color: #888888;
+            }
+        """)
+        
+        # Show menu at cursor position
+        menu.exec_(QCursor.pos())
+    
+    def toggle_all_power(self):
+        """Toggle power for all devices"""
+        if not self.controller.keylights:
+            return
+        
+        new_state = self.power_button.isChecked()
+        
+        for widget in self.controller.keylight_widgets:
+            # Check ignore locks setting
+            if not self.ignore_locks and widget.is_locked:
+                continue
+            
+            widget.keylight.on = new_state
+            widget.power_button.setChecked(new_state)
+            widget.update_power_button_style()
+            widget.update_device()
+        
+        self.update_power_button_style()
+    
+    def brightness_changed(self, value):
+        """Handle brightness slider change"""
+        if not self.controller.keylights:
+            return
+        
+        self.brightness_label.setText(f"{value}%")
+        
+        for widget in self.controller.keylight_widgets:
+            # Check ignore locks setting
+            if not self.ignore_locks and widget.is_locked:
+                continue
+            
+            widget.keylight.brightness = value
+            widget.brightness_slider.setValue(value)
+            widget.brightness_label.setText(f"{value}%")
+            widget.update_power_button_style()
+            widget.update_device()
+    
+    def temperature_changed(self, value):
+        """Handle temperature slider change"""
+        if not self.controller.keylights:
+            return
+        
+        kelvin = self.to_kelvin(value)
+        self.temp_label.setText(f"{kelvin}K")
+        
+        for widget in self.controller.keylight_widgets:
+            # Check ignore locks setting
+            if not self.ignore_locks and widget.is_locked:
+                continue
+            
+            widget.keylight.temperature = value
+            widget.temp_slider.setValue(value)
+            widget.temp_label.setText(f"{kelvin}K")
+            widget.update_power_button_style()
+            widget.update_device()
+    
+    def to_kelvin(self, slider_value):
+        """Convert slider value to Kelvin"""
+        return int(2900 + (slider_value - 143) * (7000 - 2900) / (344 - 143))
+    
+    def update_from_devices(self):
+        """Update master controls based on device states"""
+        if not self.controller.keylights:
+            return
+        
+        # Use first device as reference for initial values
+        first_device = self.controller.keylights[0]
+        self.power_button.setChecked(first_device.on)
+        self.brightness_slider.setValue(first_device.brightness)
+        self.brightness_label.setText(f"{first_device.brightness}%")
+        self.temp_slider.setValue(first_device.temperature)
+        self.temp_label.setText(f"{self.to_kelvin(first_device.temperature)}K")
+        self.update_power_button_style()
+    
+    def update_power_button_style(self):
+        """Update power button style based on device states"""
+        if not self.controller.keylights:
+            return
+        
+        # Calculate average color from all devices for gradient effect
+        total_r, total_g, total_b = 0, 0, 0
+        device_count = 0
+        
+        for widget in self.controller.keylight_widgets:
+            if widget.keylight.on:
+                brightness = widget.keylight.brightness / 100.0
+                temp = widget.keylight.temperature
+                
+                # Convert temperature to RGB
+                kelvin = 2900 + (temp - 143) * (7000 - 2900) / (344 - 143)
+                if kelvin <= 6600:
+                    r = 255
+                    g = int(99.4708025861 * math.log(kelvin / 100) - 161.1195681661) if kelvin > 2000 else 255
+                    b = int(138.5177312231 * math.log(kelvin / 100 - 10) - 305.0447927307) if kelvin >= 2000 else 255
+                else:
+                    r = int(329.698727446 * ((kelvin / 100 - 60) ** -0.1332047592))
+                    g = int(288.1221695283 * ((kelvin / 100 - 60) ** -0.0755148492))
+                    b = 255
+                
+                # Apply brightness
+                r = int(r * brightness)
+                g = int(g * brightness)
+                b = int(b * brightness)
+                
+                total_r += r
+                total_g += g
+                total_b += b
+                device_count += 1
+        
+        if device_count > 0:
+            avg_r = min(255, total_r // device_count)
+            avg_g = min(255, total_g // device_count)
+            avg_b = min(255, total_b // device_count)
+            color = f"rgb({avg_r}, {avg_g}, {avg_b})"
+        else:
+            color = "#404040"
+        
+        if self.power_button.isChecked() and device_count > 0:
+            self.power_button.setStyleSheet(f"""
+                QPushButton#masterPowerButton {{
+                    background-color: {color};
+                    border: 2px solid #ffffff;
+                    border-radius: 18px;
+                    font-size: 16px;
+                    font-weight: bold;
+                }}
+                QPushButton#masterPowerButton:hover {{
+                    border: 2px solid #cccccc;
+                }}
+            """)
+            self.power_button.setText("●")
+        else:
+            self.power_button.setStyleSheet("""
+                QPushButton#masterPowerButton {
+                    background-color: #404040;
+                    border: 2px solid #666666;
+                    border-radius: 18px;
+                    color: #888888;
+                    font-size: 16px;
+                    font-weight: bold;
+                }
+                QPushButton#masterPowerButton:hover {
+                    background-color: #4a4a4a;
+                    border: 2px solid #777777;
+                }
+            """)
+            self.power_button.setText("○")
+
+
 class KeyLightWidget(QFrame):
     """Widget for controlling a single Key Light"""
     power_state_changed = Signal()
@@ -258,6 +546,7 @@ class KeyLightWidget(QFrame):
         
         # Header with device name and menu button
         header_layout = QHBoxLayout()
+        header_layout.setSpacing(8)  # Reduce default spacing
         
         # Power button (circular with icon)
         self.power_button = QPushButton("⏻")
@@ -265,6 +554,11 @@ class KeyLightWidget(QFrame):
         self.power_button.setObjectName("powerButton")
         self.power_button.setFixedSize(36, 36)
         self.power_button.clicked.connect(self.toggle_power)
+        
+        # Lock icon (hidden by default)
+        self.lock_icon = QLabel("🔒")  # Lock symbol
+        self.lock_icon.setObjectName("lockIcon")
+        self.lock_icon.setVisible(False)  # Hidden by default
         
         # Device name
         self.name_label = QLabel(self.keylight.name)
@@ -277,6 +571,7 @@ class KeyLightWidget(QFrame):
         self.menu_button.clicked.connect(self.show_device_menu)
         
         header_layout.addWidget(self.power_button)
+        header_layout.addWidget(self.lock_icon, 0)  # No stretch, tight spacing
         header_layout.addWidget(self.name_label)
         header_layout.addStretch()
         header_layout.addWidget(self.menu_button)
@@ -657,15 +952,11 @@ class KeyLightWidget(QFrame):
     def update_lock_visual(self):
         """Update visual indication of lock state"""
         if self.is_locked:
-            # Add lock indicator - subtle orange border
-            self.setStyleSheet(self.styleSheet() + """
-                KeyLightWidget {
-                    border: 2px solid #ff6b35;
-                }
-            """)
+            # Show lock icon
+            self.lock_icon.setVisible(True)
         else:
-            # Remove lock styling by resetting to base style
-            self.setStyleSheet("")
+            # Hide lock icon
+            self.lock_icon.setVisible(False)
     
     def sync_to_others(self, controller, sync_type):
         """Sync this device's settings to all other devices"""
@@ -732,6 +1023,7 @@ class KeyLightController(QMainWindow):
         self.keylight_widgets = []
         self.device_config = DeviceConfig()
         self.discovery = KeyLightDiscovery()
+        self.master_device_widget = None  # Will be created in setup_ui
         self.setup_ui()
         self.apply_dark_theme()
         self.setup_system_tray()
@@ -783,6 +1075,22 @@ class KeyLightController(QMainWindow):
         self.devices_layout.setSpacing(8)
         # Don't add stretch - we want tight packing
         
+        # Create master device widget (hidden by default)
+        self.master_device_widget = MasterDeviceWidget(self)
+        # Load ignore locks setting
+        ignore_locks = self.device_config.get_app_setting('master_ignore_locks', True)
+        self.master_device_widget.ignore_locks = ignore_locks
+        # Load master device visibility setting
+        master_device_visible = self.device_config.get_app_setting('master_device_visible', False)
+        self.master_device_widget.setVisible(master_device_visible)
+        self.devices_layout.addWidget(self.master_device_widget)
+        
+        # Update master device toggle button appearance
+        self.update_master_device_toggle_appearance()
+        
+        # Apply initial master state to device controls
+        self.update_device_controls_for_master_state(master_device_visible)
+        
         self.scroll_area.setWidget(self.devices_container)
         main_layout.addWidget(self.scroll_area)
         
@@ -794,7 +1102,7 @@ class KeyLightController(QMainWindow):
         
         master_layout = QHBoxLayout(self.master_panel)
         master_layout.setContentsMargins(16, 8, 16, 8)
-        master_layout.setSpacing(12)
+        master_layout.setSpacing(8)  # Reduce from 12 to 8 for tighter spacing
         
         # Master power button (30% smaller than device buttons: 36px -> 25px)
         self.master_power_button = QPushButton("⏻")
@@ -805,6 +1113,14 @@ class KeyLightController(QMainWindow):
         
         master_layout.addWidget(self.master_power_button)
         
+        # Master device toggle button (directly to the right of master power button)
+        self.master_device_toggle = QPushButton("M")
+        self.master_device_toggle.setObjectName("syncRevealButton")  # Use same style
+        self.master_device_toggle.setFixedSize(25, 25)
+        self.master_device_toggle.setToolTip("Show master device control")
+        self.master_device_toggle.clicked.connect(self.toggle_master_device_control)
+        master_layout.addWidget(self.master_device_toggle)
+        
         # Sync reveal button
         self.sync_reveal_button = QPushButton("🔗")
         self.sync_reveal_button.setObjectName("syncRevealButton")
@@ -813,12 +1129,13 @@ class KeyLightController(QMainWindow):
         self.sync_reveal_button.clicked.connect(self.toggle_sync_controls)
         master_layout.addWidget(self.sync_reveal_button)
         
-        # Hidden sync controls container
+        # Hidden sync controls container (appears right after sync button)
         self.sync_container = QWidget()
         self.sync_container.setVisible(False)
+        self.sync_container.setStyleSheet("background-color: transparent;")  # Ensure transparent background
         sync_layout = QHBoxLayout(self.sync_container)
         sync_layout.setContentsMargins(0, 0, 0, 0)
-        sync_layout.setSpacing(8)
+        sync_layout.setSpacing(4)  # Reduce spacing from 8 to 4
         
         # Separator
         separator = QFrame()
@@ -903,6 +1220,84 @@ class KeyLightController(QMainWindow):
         
         # Save visibility state
         self.save_sync_settings()
+    
+    def toggle_master_device_control(self):
+        """Toggle visibility of master device control"""
+        is_visible = self.master_device_widget.isVisible()
+        new_visibility = not is_visible
+        
+        # Show/hide master device widget
+        self.master_device_widget.setVisible(new_visibility)
+        
+        # Update device controls and sync state based on master visibility
+        self.update_device_controls_for_master_state(new_visibility)
+        
+        # Update button appearance and tooltip
+        self.update_master_device_toggle_appearance()
+        
+        # Adjust window size for new state
+        self.adjust_window_size()
+        
+        # Save visibility state
+        self.device_config.set_app_setting('master_device_visible', new_visibility)
+    
+    def update_device_controls_for_master_state(self, master_visible):
+        """Update device controls and sync state based on master visibility"""
+        if master_visible:
+            # When master is enabled:
+            # 1. Hide all device controls
+            for widget in self.keylight_widgets:
+                widget.setVisible(False)
+            
+            # 2. Store current sync controls visibility state and hide them
+            if not hasattr(self, '_sync_controls_state_before_master'):
+                self._sync_controls_state_before_master = self.sync_container.isVisible()
+            self.sync_container.setVisible(False)
+            
+            # 3. Disable sync reveal button
+            self.sync_reveal_button.setEnabled(False)
+            self.sync_reveal_button.setStyleSheet("""
+                QPushButton#syncRevealButton {
+                    background-color: #2a2a2a;
+                    border: 1px solid #444444;
+                    border-radius: 12px;
+                    color: #666666;
+                    font-size: 16px;
+                    font-weight: bold;
+                }
+            """)
+        else:
+            # When master is disabled:
+            # 1. Show all device controls
+            for widget in self.keylight_widgets:
+                widget.setVisible(True)
+            
+            # 2. Restore sync controls visibility state
+            if hasattr(self, '_sync_controls_state_before_master'):
+                self.sync_container.setVisible(self._sync_controls_state_before_master)
+                # Update sync reveal button appearance based on restored state
+                if self._sync_controls_state_before_master:
+                    self.sync_reveal_button.setText("⛓️‍💥")
+                    self.sync_reveal_button.setToolTip("Hide sync controls")
+                else:
+                    self.sync_reveal_button.setText("🔗")
+                    self.sync_reveal_button.setToolTip("Show sync controls")
+                delattr(self, '_sync_controls_state_before_master')
+            
+            # 3. Re-enable sync reveal button
+            self.sync_reveal_button.setEnabled(True)
+            self.sync_reveal_button.setStyleSheet("")  # Reset to default style
+    
+    def update_master_device_toggle_appearance(self):
+        """Update the master device toggle button appearance based on visibility"""
+        if hasattr(self, 'master_device_widget') and hasattr(self, 'master_device_toggle'):
+            is_visible = self.master_device_widget.isVisible()
+            if is_visible:
+                self.master_device_toggle.setText("M̄")  # M with overline
+                self.master_device_toggle.setToolTip("Hide master device control")
+            else:
+                self.master_device_toggle.setText("M")
+                self.master_device_toggle.setToolTip("Show master device control")
     
     def load_sync_settings(self):
         """Load sync settings from config"""
@@ -1279,6 +1674,18 @@ class KeyLightController(QMainWindow):
             border: 2px solid #aaaaaa;
         }
         
+        QFrame#MasterDeviceWidget {
+            background-color: #333333;
+            border-radius: 12px;
+            border: 1px solid #4a4a4a;
+            margin-bottom: 8px;
+        }
+        
+        QFrame#MasterDeviceWidget::hover{
+            border: 1px solid #5a5a5a;
+            background-color: #3a3a3a;
+        }
+        
         QFrame#MasterPanel {
             background-color: #2a2a2a;
             border-radius: 12px;
@@ -1353,6 +1760,14 @@ class KeyLightController(QMainWindow):
             color: #ffffff;
             font-size: 14px;
             font-weight: 500;
+            margin-left: -2px;
+        }
+        
+        QLabel#lockIcon {
+            color: #ff6b35;
+            font-size: 14px;
+            margin: 0px;
+            padding: 0px;
         }
         
         QLabel#sliderIcon {
@@ -1425,6 +1840,15 @@ class KeyLightController(QMainWindow):
         QSlider#temperatureSlider::groove:horizontal {
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                 stop:0 #88aaff, stop:1 #ff9944);
+        }
+        
+        QToolTip {
+            background-color: #2a2a2a;
+            color: #ffffff;
+            border: 1px solid #555555;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
         }
         """
         self.setStyleSheet(style)
@@ -1528,6 +1952,17 @@ class KeyLightController(QMainWindow):
         # Add to layout
         self.devices_layout.addWidget(widget)
         
+        # Update master device widget
+        if self.master_device_widget:
+            self.master_device_widget.update_device_count()
+            # Update from first device if this is the first device added
+            if len(self.keylights) == 1:
+                self.master_device_widget.update_from_devices()
+        
+        # If master is enabled, hide this new device widget
+        if hasattr(self, 'master_device_widget') and self.master_device_widget.isVisible():
+            widget.setVisible(False)
+        
         # Adjust window height dynamically
         self.adjust_window_size()
         
@@ -1535,25 +1970,27 @@ class KeyLightController(QMainWindow):
         self.update_master_button_state()
         
     def adjust_window_size(self):
-        """Dynamically adjust window size based on number of lights"""
-        num_lights = len(self.keylights)
-        
-        if num_lights == 0:
-            # Show master panel even with no devices
-            master_panel_height = 60
-            title_bar = 35
-            margins = 16
-            self.setFixedHeight(master_panel_height + title_bar + margins + 50)  # Extra space for empty state
-            return
-        
-        # Calculate needed height (widgets + spacing + margins)
-        # master panel + widget_height * num_lights + spacing between widgets + top/bottom margins + title bar
+        """Dynamically adjust window size based on visible controls"""
         master_panel_height = 60  # Height of master control panel
-        spacing_between = (num_lights - 1) * 8 if num_lights > 1 else 0
-        margins = 16  # 8px top + 8px bottom
         title_bar = 35  # Approximate title bar height
+        margins = 16  # Top and bottom margins
         
-        needed_height = master_panel_height + (num_lights * self.widget_height) + spacing_between + margins + title_bar
+        # Check if master device control is visible
+        master_device_visible = (hasattr(self, 'master_device_widget') and 
+                               self.master_device_widget.isVisible())
+        
+        if master_device_visible:
+            # Only master device control is visible - calculate height for master only
+            master_device_height = 140  # Approximate height of master device widget
+            needed_height = master_panel_height + master_device_height + margins + title_bar
+        elif len(self.keylights) == 0:
+            # No devices, just master panel
+            needed_height = master_panel_height + title_bar + margins + 50  # Extra space for empty state
+        else:
+            # Individual device controls are visible
+            num_lights = len(self.keylights)
+            spacing_between = (num_lights - 1) * 8 if num_lights > 1 else 0
+            needed_height = master_panel_height + (num_lights * self.widget_height) + spacing_between + margins + title_bar
         
         # Cap at maximum height
         new_height = min(needed_height, self.max_height)
