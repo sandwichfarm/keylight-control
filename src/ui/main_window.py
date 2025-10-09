@@ -198,16 +198,15 @@ class KeyLightController(QMainWindow):
         self.pending_sync_updates = {}
 
         master_layout.addWidget(self.sync_container)
+        master_layout.addStretch()
 
-        # Settings button (three dots)
+        # Settings button (three dots) pinned to right
         self.settings_button = QPushButton("⋯")
         self.settings_button.setObjectName("settingsButton")
         self.settings_button.setFixedSize(25, 25)
         self.settings_button.setToolTip("Settings")
         self.settings_button.clicked.connect(self.open_settings_dialog)
         master_layout.addWidget(self.settings_button)
-
-        master_layout.addStretch()
 
     # --- actions and helpers ---
     def toggle_all_lights(self):
@@ -290,7 +289,13 @@ class KeyLightController(QMainWindow):
         self.temp_sync_enabled = self.device_config.get_app_setting("temp_sync_enabled", False)
         self.brightness_sync_enabled = self.device_config.get_app_setting("brightness_sync_enabled", False)
         self.all_sync_enabled = self.device_config.get_app_setting("all_sync_enabled", False)
-        sync_controls_visible = self.device_config.get_app_setting("sync_controls_visible", False)
+        # default for sync controls visibility comes from preferences
+        sc_default = False
+        try:
+            sc_default = bool(self.prefs.get("general.show_sync_controls_default", False))
+        except Exception:
+            pass
+        sync_controls_visible = self.device_config.get_app_setting("sync_controls_visible", sc_default)
         self.temp_sync_button.setChecked(self.temp_sync_enabled)
         self.brightness_sync_button.setChecked(self.brightness_sync_enabled)
         self.sync_all_button.setChecked(self.all_sync_enabled)
@@ -601,6 +606,11 @@ class KeyLightController(QMainWindow):
     def _apply_all_preferences(self):
         self._apply_features_visibility()
         self._apply_widget_update_interval()
+        self._apply_sync_timer_interval()
+        self._apply_http_timeout()
+        self._apply_keyboard_shortcuts()
+        self._apply_tray_icon_enabled()
+        self._apply_enable_discovery()
         self.update_master_button_state()
 
     def _on_setting_changed(self, key: str, _value):
@@ -608,8 +618,20 @@ class KeyLightController(QMainWindow):
             self._apply_features_visibility()
         elif key == "perf.widget_update_interval_ms":
             self._apply_widget_update_interval()
+        elif key == "perf.sync_timer_interval_ms":
+            self._apply_sync_timer_interval()
+        elif key == "perf.http_timeout_s":
+            self._apply_http_timeout()
+        elif key == "features.show_master_device_control":
+            self._apply_features_visibility()
+        elif key == "general.tray_icon_enabled":
+            self._apply_tray_icon_enabled()
+        elif key == "features.enable_keyboard_shortcuts":
+            self._apply_keyboard_shortcuts()
         elif key == "advanced.master_power_semantics":
             self.update_master_button_state()
+        elif key == "features.enable_discovery":
+            self._apply_enable_discovery()
 
     def _apply_features_visibility(self):
         show_sync = True
@@ -621,6 +643,16 @@ class KeyLightController(QMainWindow):
         if not show_sync:
             self.sync_container.setVisible(False)
 
+        # Master device control feature
+        show_master = True
+        try:
+            show_master = bool(self.prefs.get("features.show_master_device_control", True))
+        except Exception:
+            pass
+        self.master_device_toggle.setVisible(show_master)
+        if not show_master and hasattr(self, 'master_device_widget'):
+            self.master_device_widget.setVisible(False)
+
     def _apply_widget_update_interval(self):
         try:
             interval = int(self.prefs.get("perf.widget_update_interval_ms", 50))
@@ -631,6 +663,76 @@ class KeyLightController(QMainWindow):
                 w.update_timer.setInterval(interval)
             except Exception:
                 pass
+
+    def _apply_sync_timer_interval(self):
+        try:
+            iv = int(self.prefs.get("perf.sync_timer_interval_ms", 300))
+        except Exception:
+            iv = 300
+        self.sync_timer.setInterval(iv)
+
+    def _apply_http_timeout(self):
+        try:
+            to_s = float(self.prefs.get("perf.http_timeout_s", 2.0))
+        except Exception:
+            to_s = 2.0
+        try:
+            self.service._timeout = to_s  # update runtime timeout
+        except Exception:
+            pass
+
+    def _apply_tray_icon_enabled(self):
+        try:
+            enabled = bool(self.prefs.get("general.tray_icon_enabled", True))
+        except Exception:
+            enabled = True
+        try:
+            if enabled:
+                if not hasattr(self, 'tray_icon') or self.tray_icon is None:
+                    self.setup_system_tray()
+                else:
+                    self.tray_icon.show()
+            else:
+                if hasattr(self, 'tray_icon') and self.tray_icon is not None:
+                    self.tray_icon.hide()
+        except Exception:
+            pass
+
+    def _apply_keyboard_shortcuts(self):
+        try:
+            enabled = bool(self.prefs.get("features.enable_keyboard_shortcuts", True))
+        except Exception:
+            enabled = True
+        try:
+            # Ensure shortcuts exist
+            if not hasattr(self, 'quit_shortcut_obj'):
+                self.quit_shortcut_obj = QShortcut(QKeySequence.Quit, self)
+                self.quit_shortcut_obj.activated.connect(self.quit_application)
+            if not hasattr(self, 'escape_shortcut_obj'):
+                self.escape_shortcut_obj = QShortcut(QKeySequence("Escape"), self)
+                self.escape_shortcut_obj.activated.connect(self._on_escape)
+            self.quit_shortcut_obj.setEnabled(enabled)
+            self.escape_shortcut_obj.setEnabled(enabled)
+        except Exception:
+            pass
+
+    def _apply_enable_discovery(self):
+        try:
+            enabled = bool(self.prefs.get("features.enable_discovery", True))
+        except Exception:
+            enabled = True
+        try:
+            # Initialize flag if missing
+            if not hasattr(self, '_discovery_enabled'):
+                self._discovery_enabled = True
+            if enabled and not self._discovery_enabled:
+                self.discovery.start_discovery()
+                self._discovery_enabled = True
+            elif not enabled and self._discovery_enabled:
+                self.discovery.stop_discovery()
+                self._discovery_enabled = False
+        except Exception:
+            pass
 
     def fetch_device_mac(self, device_info):
         asyncio.create_task(self._fetch_and_add_device(device_info))

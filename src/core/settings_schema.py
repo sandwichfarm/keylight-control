@@ -25,6 +25,8 @@ class FeatureSettings:
     enable_discovery: bool = True
     enable_auto_sync: bool = True
     enable_keyboard_shortcuts: bool = True
+    hide_devices_when_discovery_disabled: bool = False
+    dim_devices_when_discovery_disabled: bool = True
 
 
 @dataclass
@@ -61,6 +63,8 @@ def defaults_dict() -> Dict[str, Any]:
         "features.enable_discovery": f.enable_discovery,
         "features.enable_auto_sync": f.enable_auto_sync,
         "features.enable_keyboard_shortcuts": f.enable_keyboard_shortcuts,
+        "features.hide_devices_when_discovery_disabled": f.hide_devices_when_discovery_disabled,
+        "features.dim_devices_when_discovery_disabled": f.dim_devices_when_discovery_disabled,
         # Performance
         "perf.widget_update_interval_ms": p.widget_update_interval_ms,
         "perf.widget_min_update_spacing_ms": p.widget_min_update_spacing_ms,
@@ -70,4 +74,3 @@ def defaults_dict() -> Dict[str, Any]:
         "advanced.master_power_semantics": a.master_power_semantics,
         "advanced.enable_debug_logging": a.enable_debug_logging,
     }
-

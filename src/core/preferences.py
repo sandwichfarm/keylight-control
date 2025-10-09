@@ -58,6 +58,14 @@ class PreferencesService(QObject):
     def reset_to_defaults(self) -> None:
         self.apply(self._defaults, persist=True)
 
+    def reset_section(self, prefix: str) -> None:
+        section = {k: v for k, v in self._defaults.items() if k.startswith(prefix)}
+        if section:
+            self.apply(section, persist=True)
+
+    def defaults(self) -> Dict[str, Any]:
+        return dict(self._defaults)
+
     # --- internals ---
     def _load(self) -> None:
         # Initialize from config, falling back to defaults
@@ -70,4 +78,3 @@ class PreferencesService(QObject):
 
     def _persist_one(self, key: str, value: Any) -> None:
         self._config.set_app_setting(key, value)
-
