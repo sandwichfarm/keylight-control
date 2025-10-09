@@ -212,12 +212,52 @@ class KeyLightController(QMainWindow):
     def toggle_all_lights(self):
         if not self.keylights:
             return
-        master_state = self.master_power_button.isChecked()
-        for widget in self.keylight_widgets:
-            widget.keylight.on = master_state
-            widget.power_button.setChecked(master_state)
-            widget.update_power_button_style()
-            widget.schedule_update()
+        # Determine semantics and current device states
+        try:
+            semantics = str(self.prefs.get("advanced.master_power_semantics", "AnyOn"))
+        except Exception:
+            semantics = "AnyOn"
+        # Backward compat
+        if semantics == "AllOn":
+            semantics = "AnyOff"
+
+        any_on = any(kl.on for kl in self.keylights)
+        any_off = any((not kl.on) for kl in self.keylights)
+
+        if semantics == "AnyOn":
+            if any_on:
+                # Turn any ON devices OFF
+                for widget in self.keylight_widgets:
+                    if widget.keylight.on:
+                        widget.keylight.on = False
+                        widget.power_button.setChecked(False)
+                        widget.update_power_button_style()
+                        widget.schedule_update()
+            else:
+                # All are OFF: turn all ON
+                for widget in self.keylight_widgets:
+                    widget.keylight.on = True
+                    widget.power_button.setChecked(True)
+                    widget.update_power_button_style()
+                    widget.schedule_update()
+        else:  # AnyOff
+            if any_off:
+                # Turn any OFF devices ON
+                for widget in self.keylight_widgets:
+                    if not widget.keylight.on:
+                        widget.keylight.on = True
+                        widget.power_button.setChecked(True)
+                        widget.update_power_button_style()
+                        widget.schedule_update()
+            else:
+                # All are ON: turn all OFF
+                for widget in self.keylight_widgets:
+                    widget.keylight.on = False
+                    widget.power_button.setChecked(False)
+                    widget.update_power_button_style()
+                    widget.schedule_update()
+
+        self.update_master_button_state()
         self.update_master_button_style()
 
     def toggle_sync_controls(self):
@@ -526,7 +566,10 @@ class KeyLightController(QMainWindow):
         )
 
     def update_master_button_state(self):
-        """Master button is ON if any device is ON; OFF only if all are OFF."""
+        """Master button semantics:
+        - AnyOn: ON if any device is ON
+        - AnyOff: OFF if any device is OFF (ON only when all are ON)
+        """
         if not self.keylights:
             self.master_power_button.setChecked(False)
             self.update_master_button_style()
@@ -535,9 +578,11 @@ class KeyLightController(QMainWindow):
             semantics = str(self.prefs.get("advanced.master_power_semantics", "AnyOn"))
         except Exception:
             semantics = "AnyOn"
-        if semantics == "AllOn":
+        if semantics == "AllOn":  # backward compat mapping
+            semantics = "AnyOff"
+        if semantics == "AnyOff":
             state = all(kl.on for kl in self.keylights)
-        else:
+        else:  # AnyOn
             state = any(kl.on for kl in self.keylights)
         self.master_power_button.setChecked(state)
         self.update_master_button_style()
@@ -728,9 +773,37 @@ class KeyLightController(QMainWindow):
             if enabled and not self._discovery_enabled:
                 self.discovery.start_discovery()
                 self._discovery_enabled = True
+                # Restore devices visibility/enabled state
+                try:
+                    hide = bool(self.prefs.get("features.hide_devices_when_discovery_disabled", False))
+                except Exception:
+                    hide = False
+                try:
+                    dim = bool(self.prefs.get("features.dim_devices_when_discovery_disabled", True))
+                except Exception:
+                    dim = True
+                for w in self.keylight_widgets:
+                    if hide:
+                        w.setVisible(True)
+                    if dim:
+                        w.setEnabled(True)
             elif not enabled and self._discovery_enabled:
                 self.discovery.stop_discovery()
                 self._discovery_enabled = False
+                # Apply optional hide/dim behavior
+                try:
+                    hide = bool(self.prefs.get("features.hide_devices_when_discovery_disabled", False))
+                except Exception:
+                    hide = False
+                try:
+                    dim = bool(self.prefs.get("features.dim_devices_when_discovery_disabled", True))
+                except Exception:
+                    dim = True
+                for w in self.keylight_widgets:
+                    if hide:
+                        w.setVisible(False)
+                    if dim:
+                        w.setEnabled(False)
         except Exception:
             pass
 
@@ -761,6 +834,24 @@ class KeyLightController(QMainWindow):
         widget.name_label.setText(custom_label)
         self.keylight_widgets.append(widget)
         self.devices_layout.addWidget(widget)
+        # If discovery disabled, apply hide/dim behavior to new widgets
+        try:
+            disc_enabled = bool(self.prefs.get("features.enable_discovery", True))
+        except Exception:
+            disc_enabled = True
+        if not disc_enabled:
+            try:
+                hide = bool(self.prefs.get("features.hide_devices_when_discovery_disabled", False))
+            except Exception:
+                hide = False
+            try:
+                dim = bool(self.prefs.get("features.dim_devices_when_discovery_disabled", True))
+            except Exception:
+                dim = True
+            if hide:
+                widget.setVisible(False)
+            if dim:
+                widget.setEnabled(False)
         if self.master_device_widget:
             self.master_device_widget.update_device_count()
             if len(self.keylights) == 1:

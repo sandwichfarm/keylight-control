@@ -24,19 +24,48 @@ class SettingsDialog(QDialog):
         self.resize(520, 360)
 
         root = QVBoxLayout(self)
-        tabs = QTabWidget()
-        root.addWidget(tabs)
+        self._tabs = QTabWidget()
+        root.addWidget(self._tabs)
 
-        tabs.addTab(self._build_general_tab(), "General")
-        tabs.addTab(self._build_features_tab(), "Features")
-        tabs.addTab(self._build_performance_tab(), "Performance")
-        tabs.addTab(self._build_advanced_tab(), "Advanced")
+        self._tabs.addTab(self._build_general_tab(), "General")
+        self._tabs.addTab(self._build_features_tab(), "Features")
+        self._tabs.addTab(self._build_performance_tab(), "Performance")
+        self._tabs.addTab(self._build_advanced_tab(), "Advanced")
+
+        # Reset buttons row
+        from PySide6.QtWidgets import QPushButton
+        reset_row = QHBoxLayout()
+        self.reset_tab_btn = QPushButton("Reset This Tab")
+        self.reset_all_btn = QPushButton("Reset All")
+        self.reset_tab_btn.clicked.connect(self._reset_current_tab)
+        self.reset_all_btn.clicked.connect(self._reset_all)
+        reset_row.addStretch(1)
+        reset_row.addWidget(self.reset_tab_btn)
+        reset_row.addWidget(self.reset_all_btn)
+        root.addLayout(reset_row)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
         buttons.button(QDialogButtonBox.Close).setText("Close")
         root.addWidget(buttons)
+
+    # --- resets ---
+    def _reset_current_tab(self):
+        idx = self._tabs.currentIndex()
+        prefix = "general."
+        if idx == 0:
+            prefix = "general."
+        elif idx == 1:
+            prefix = "features."
+        elif idx == 2:
+            prefix = "perf."
+        elif idx == 3:
+            prefix = "advanced."
+        self.prefs.reset_section(prefix)
+
+    def _reset_all(self):
+        self.prefs.reset_to_defaults()
 
     # --- tabs ---
     def _build_general_tab(self) -> QWidget:
@@ -86,6 +115,16 @@ class SettingsDialog(QDialog):
         enable_discovery.setChecked(bool(self.prefs.get("features.enable_discovery", True)))
         enable_discovery.toggled.connect(lambda v: self.prefs.set("features.enable_discovery", bool(v)))
         l.addWidget(enable_discovery)
+
+        hide_on_disc_off = QCheckBox("Hide devices when discovery disabled")
+        hide_on_disc_off.setChecked(bool(self.prefs.get("features.hide_devices_when_discovery_disabled", False)))
+        hide_on_disc_off.toggled.connect(lambda v: self.prefs.set("features.hide_devices_when_discovery_disabled", bool(v)))
+        l.addWidget(hide_on_disc_off)
+
+        dim_on_disc_off = QCheckBox("Dim (disable) devices when discovery disabled")
+        dim_on_disc_off.setChecked(bool(self.prefs.get("features.dim_devices_when_discovery_disabled", True)))
+        dim_on_disc_off.toggled.connect(lambda v: self.prefs.set("features.dim_devices_when_discovery_disabled", bool(v)))
+        l.addWidget(dim_on_disc_off)
 
         enable_auto_sync = QCheckBox("Enable live sync while adjusting")
         enable_auto_sync.setChecked(bool(self.prefs.get("features.enable_auto_sync", True)))
@@ -141,9 +180,12 @@ class SettingsDialog(QDialog):
         l = QVBoxLayout(w)
         l.addWidget(QLabel("Master power semantics"))
         combo = QComboBox()
-        combo.addItem("Any device on => Master ON", "AnyOn")
-        combo.addItem("All devices on => Master ON (else OFF)", "AllOn")
+        combo.addItem("Any device ON ⇒ Master ON (click: turn ONs OFF)", "AnyOn")
+        combo.addItem("Any device OFF ⇒ Master OFF (click: turn OFFs ON)", "AnyOff")
         current = str(self.prefs.get("advanced.master_power_semantics", "AnyOn"))
+        # Backward compat for earlier value
+        if current == "AllOn":
+            current = "AnyOff"
         idx = combo.findData(current)
         if idx >= 0:
             combo.setCurrentIndex(idx)

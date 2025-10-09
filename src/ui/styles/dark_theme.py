@@ -2,7 +2,6 @@ def get_style() -> str:
     return """
     QMainWindow {
         background-color: #1a1a1a;
-        border-radius: 5px;
     }
 
     QWidget {
