@@ -197,7 +197,16 @@ class KeyLightWidget(QFrame):
     def process_pending_update(self) -> None:
         if self.pending_update:
             current_time = time.time()
-            if current_time - self.last_update_time >= 0.1:
+            # Determine min spacing from preferences (ms)
+            controller = self._find_controller()
+            min_gap_s = 0.1
+            if controller and hasattr(controller, 'prefs'):
+                try:
+                    min_gap_ms = int(controller.prefs.get("perf.widget_min_update_spacing_ms", 100))
+                    min_gap_s = max(0.0, min_gap_ms / 1000.0)
+                except Exception:
+                    pass
+            if current_time - self.last_update_time >= min_gap_s:
                 self.update_device()
                 self.last_update_time = current_time
                 self.pending_update = None
@@ -273,9 +282,16 @@ class KeyLightWidget(QFrame):
         if not controller:
             return
 
-        rename_action = QAction("Rename Device", self)
-        rename_action.triggered.connect(lambda: self.rename_device(controller))
-        menu.addAction(rename_action)
+        # Optional: rename action
+        show_rename = True
+        try:
+            show_rename = bool(controller.prefs.get("features.show_rename_action", True))
+        except Exception:
+            pass
+        if show_rename:
+            rename_action = QAction("Rename Device", self)
+            rename_action.triggered.connect(lambda: self.rename_device(controller))
+            menu.addAction(rename_action)
 
         reset_action = QAction("Reset to Default", self)
         reset_action.triggered.connect(lambda: self.reset_label(controller))

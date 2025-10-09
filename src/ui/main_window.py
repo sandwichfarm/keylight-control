@@ -25,8 +25,10 @@ from config import DeviceConfig
 from core.models import KeyLight
 from core.discovery import KeyLightDiscovery
 from core.service import KeyLightService
+from core.preferences import PreferencesService
 from ui.widgets.master_widget import MasterDeviceWidget
 from ui.widgets.keylight_widget import KeyLightWidget
+from ui.preferences.settings_dialog import SettingsDialog
 
 
 class KeyLightController(QMainWindow):
@@ -39,6 +41,7 @@ class KeyLightController(QMainWindow):
         self.device_config = DeviceConfig()
         self.discovery = KeyLightDiscovery()
         self.service = KeyLightService()
+        self.prefs = PreferencesService(self.device_config)
         self.master_device_widget = None  # Will be created in setup_ui
         self.setup_ui()
         self.apply_dark_theme()
@@ -53,6 +56,10 @@ class KeyLightController(QMainWindow):
 
         # Add keyboard shortcuts
         self.setup_shortcuts()
+
+        # Apply preferences on startup and subscribe to changes
+        self._apply_all_preferences()
+        self.prefs.setting_changed.connect(self._on_setting_changed)
 
     def setup_ui(self):
         """Setup the main UI"""
@@ -193,16 +200,64 @@ class KeyLightController(QMainWindow):
         master_layout.addWidget(self.sync_container)
         master_layout.addStretch()
 
+        # Settings button (three dots) pinned to right
+        self.settings_button = QPushButton("⋯")
+        self.settings_button.setObjectName("settingsButton")
+        self.settings_button.setFixedSize(25, 25)
+        self.settings_button.setToolTip("Settings")
+        self.settings_button.clicked.connect(self.open_settings_dialog)
+        master_layout.addWidget(self.settings_button)
+
     # --- actions and helpers ---
     def toggle_all_lights(self):
         if not self.keylights:
             return
-        master_state = self.master_power_button.isChecked()
-        for widget in self.keylight_widgets:
-            widget.keylight.on = master_state
-            widget.power_button.setChecked(master_state)
-            widget.update_power_button_style()
-            widget.schedule_update()
+        # Determine semantics and current device states
+        try:
+            semantics = str(self.prefs.get("advanced.master_power_semantics", "AnyOn"))
+        except Exception:
+            semantics = "AnyOn"
+        # Backward compat
+        if semantics == "AllOn":
+            semantics = "AnyOff"
+
+        any_on = any(kl.on for kl in self.keylights)
+        any_off = any((not kl.on) for kl in self.keylights)
+
+        if semantics == "AnyOn":
+            if any_on:
+                # Turn any ON devices OFF
+                for widget in self.keylight_widgets:
+                    if widget.keylight.on:
+                        widget.keylight.on = False
+                        widget.power_button.setChecked(False)
+                        widget.update_power_button_style()
+                        widget.schedule_update()
+            else:
+                # All are OFF: turn all ON
+                for widget in self.keylight_widgets:
+                    widget.keylight.on = True
+                    widget.power_button.setChecked(True)
+                    widget.update_power_button_style()
+                    widget.schedule_update()
+        else:  # AnyOff
+            if any_off:
+                # Turn any OFF devices ON
+                for widget in self.keylight_widgets:
+                    if not widget.keylight.on:
+                        widget.keylight.on = True
+                        widget.power_button.setChecked(True)
+                        widget.update_power_button_style()
+                        widget.schedule_update()
+            else:
+                # All are ON: turn all OFF
+                for widget in self.keylight_widgets:
+                    widget.keylight.on = False
+                    widget.power_button.setChecked(False)
+                    widget.update_power_button_style()
+                    widget.schedule_update()
+
+        self.update_master_button_state()
         self.update_master_button_style()
 
     def toggle_sync_controls(self):
@@ -274,7 +329,13 @@ class KeyLightController(QMainWindow):
         self.temp_sync_enabled = self.device_config.get_app_setting("temp_sync_enabled", False)
         self.brightness_sync_enabled = self.device_config.get_app_setting("brightness_sync_enabled", False)
         self.all_sync_enabled = self.device_config.get_app_setting("all_sync_enabled", False)
-        sync_controls_visible = self.device_config.get_app_setting("sync_controls_visible", False)
+        # default for sync controls visibility comes from preferences
+        sc_default = False
+        try:
+            sc_default = bool(self.prefs.get("general.show_sync_controls_default", False))
+        except Exception:
+            pass
+        sync_controls_visible = self.device_config.get_app_setting("sync_controls_visible", sc_default)
         self.temp_sync_button.setChecked(self.temp_sync_enabled)
         self.brightness_sync_button.setChecked(self.brightness_sync_enabled)
         self.sync_all_button.setChecked(self.all_sync_enabled)
@@ -505,13 +566,25 @@ class KeyLightController(QMainWindow):
         )
 
     def update_master_button_state(self):
-        """Master button is ON if any device is ON; OFF only if all are OFF."""
+        """Master button semantics:
+        - AnyOn: ON if any device is ON
+        - AnyOff: OFF if any device is OFF (ON only when all are ON)
+        """
         if not self.keylights:
             self.master_power_button.setChecked(False)
             self.update_master_button_style()
             return
-        any_on = any(kl.on for kl in self.keylights)
-        self.master_power_button.setChecked(any_on)
+        try:
+            semantics = str(self.prefs.get("advanced.master_power_semantics", "AnyOn"))
+        except Exception:
+            semantics = "AnyOn"
+        if semantics == "AllOn":  # backward compat mapping
+            semantics = "AnyOff"
+        if semantics == "AnyOff":
+            state = all(kl.on for kl in self.keylights)
+        else:  # AnyOn
+            state = any(kl.on for kl in self.keylights)
+        self.master_power_button.setChecked(state)
         self.update_master_button_style()
 
     def apply_blur_effect(self):
@@ -548,7 +621,13 @@ class KeyLightController(QMainWindow):
         quit_shortcut = QShortcut(QKeySequence.Quit, self)
         quit_shortcut.activated.connect(self.quit_application)
         escape_shortcut = QShortcut(QKeySequence("Escape"), self)
-        escape_shortcut.activated.connect(self.hide)
+        escape_shortcut.activated.connect(self._on_escape)
+
+    def _on_escape(self):
+        if hasattr(self, 'prefs') and bool(self.prefs.get("general.hide_on_esc", True)):
+            self.hide()
+        else:
+            pass
 
     def quit_application(self):
         self.discovery.stop_discovery()
@@ -563,6 +642,170 @@ class KeyLightController(QMainWindow):
                 self.show()
                 self.raise_()
                 self.activateWindow()
+
+    # ---- Preferences application ----
+    def open_settings_dialog(self):
+        dlg = SettingsDialog(self.prefs, self)
+        dlg.exec()
+
+    def _apply_all_preferences(self):
+        self._apply_features_visibility()
+        self._apply_widget_update_interval()
+        self._apply_sync_timer_interval()
+        self._apply_http_timeout()
+        self._apply_keyboard_shortcuts()
+        self._apply_tray_icon_enabled()
+        self._apply_enable_discovery()
+        self.update_master_button_state()
+
+    def _on_setting_changed(self, key: str, _value):
+        if key.startswith("features."):
+            self._apply_features_visibility()
+        elif key == "perf.widget_update_interval_ms":
+            self._apply_widget_update_interval()
+        elif key == "perf.sync_timer_interval_ms":
+            self._apply_sync_timer_interval()
+        elif key == "perf.http_timeout_s":
+            self._apply_http_timeout()
+        elif key == "features.show_master_device_control":
+            self._apply_features_visibility()
+        elif key == "general.tray_icon_enabled":
+            self._apply_tray_icon_enabled()
+        elif key == "features.enable_keyboard_shortcuts":
+            self._apply_keyboard_shortcuts()
+        elif key == "advanced.master_power_semantics":
+            self.update_master_button_state()
+        elif key == "features.enable_discovery":
+            self._apply_enable_discovery()
+
+    def _apply_features_visibility(self):
+        show_sync = True
+        try:
+            show_sync = bool(self.prefs.get("features.show_sync_buttons", True))
+        except Exception:
+            pass
+        self.sync_reveal_button.setVisible(show_sync)
+        if not show_sync:
+            self.sync_container.setVisible(False)
+
+        # Master device control feature
+        show_master = True
+        try:
+            show_master = bool(self.prefs.get("features.show_master_device_control", True))
+        except Exception:
+            pass
+        self.master_device_toggle.setVisible(show_master)
+        if not show_master and hasattr(self, 'master_device_widget'):
+            self.master_device_widget.setVisible(False)
+
+    def _apply_widget_update_interval(self):
+        try:
+            interval = int(self.prefs.get("perf.widget_update_interval_ms", 50))
+        except Exception:
+            interval = 50
+        for w in self.keylight_widgets:
+            try:
+                w.update_timer.setInterval(interval)
+            except Exception:
+                pass
+
+    def _apply_sync_timer_interval(self):
+        try:
+            iv = int(self.prefs.get("perf.sync_timer_interval_ms", 300))
+        except Exception:
+            iv = 300
+        self.sync_timer.setInterval(iv)
+
+    def _apply_http_timeout(self):
+        try:
+            to_s = float(self.prefs.get("perf.http_timeout_s", 2.0))
+        except Exception:
+            to_s = 2.0
+        try:
+            self.service._timeout = to_s  # update runtime timeout
+        except Exception:
+            pass
+
+    def _apply_tray_icon_enabled(self):
+        try:
+            enabled = bool(self.prefs.get("general.tray_icon_enabled", True))
+        except Exception:
+            enabled = True
+        try:
+            if enabled:
+                if not hasattr(self, 'tray_icon') or self.tray_icon is None:
+                    self.setup_system_tray()
+                else:
+                    self.tray_icon.show()
+            else:
+                if hasattr(self, 'tray_icon') and self.tray_icon is not None:
+                    self.tray_icon.hide()
+        except Exception:
+            pass
+
+    def _apply_keyboard_shortcuts(self):
+        try:
+            enabled = bool(self.prefs.get("features.enable_keyboard_shortcuts", True))
+        except Exception:
+            enabled = True
+        try:
+            # Ensure shortcuts exist
+            if not hasattr(self, 'quit_shortcut_obj'):
+                self.quit_shortcut_obj = QShortcut(QKeySequence.Quit, self)
+                self.quit_shortcut_obj.activated.connect(self.quit_application)
+            if not hasattr(self, 'escape_shortcut_obj'):
+                self.escape_shortcut_obj = QShortcut(QKeySequence("Escape"), self)
+                self.escape_shortcut_obj.activated.connect(self._on_escape)
+            self.quit_shortcut_obj.setEnabled(enabled)
+            self.escape_shortcut_obj.setEnabled(enabled)
+        except Exception:
+            pass
+
+    def _apply_enable_discovery(self):
+        try:
+            enabled = bool(self.prefs.get("features.enable_discovery", True))
+        except Exception:
+            enabled = True
+        try:
+            # Initialize flag if missing
+            if not hasattr(self, '_discovery_enabled'):
+                self._discovery_enabled = True
+            if enabled and not self._discovery_enabled:
+                self.discovery.start_discovery()
+                self._discovery_enabled = True
+                # Restore devices visibility/enabled state
+                try:
+                    hide = bool(self.prefs.get("features.hide_devices_when_discovery_disabled", False))
+                except Exception:
+                    hide = False
+                try:
+                    dim = bool(self.prefs.get("features.dim_devices_when_discovery_disabled", True))
+                except Exception:
+                    dim = True
+                for w in self.keylight_widgets:
+                    if hide:
+                        w.setVisible(True)
+                    if dim:
+                        w.setEnabled(True)
+            elif not enabled and self._discovery_enabled:
+                self.discovery.stop_discovery()
+                self._discovery_enabled = False
+                # Apply optional hide/dim behavior
+                try:
+                    hide = bool(self.prefs.get("features.hide_devices_when_discovery_disabled", False))
+                except Exception:
+                    hide = False
+                try:
+                    dim = bool(self.prefs.get("features.dim_devices_when_discovery_disabled", True))
+                except Exception:
+                    dim = True
+                for w in self.keylight_widgets:
+                    if hide:
+                        w.setVisible(False)
+                    if dim:
+                        w.setEnabled(False)
+        except Exception:
+            pass
 
     def fetch_device_mac(self, device_info):
         asyncio.create_task(self._fetch_and_add_device(device_info))
@@ -591,6 +834,24 @@ class KeyLightController(QMainWindow):
         widget.name_label.setText(custom_label)
         self.keylight_widgets.append(widget)
         self.devices_layout.addWidget(widget)
+        # If discovery disabled, apply hide/dim behavior to new widgets
+        try:
+            disc_enabled = bool(self.prefs.get("features.enable_discovery", True))
+        except Exception:
+            disc_enabled = True
+        if not disc_enabled:
+            try:
+                hide = bool(self.prefs.get("features.hide_devices_when_discovery_disabled", False))
+            except Exception:
+                hide = False
+            try:
+                dim = bool(self.prefs.get("features.dim_devices_when_discovery_disabled", True))
+            except Exception:
+                dim = True
+            if hide:
+                widget.setVisible(False)
+            if dim:
+                widget.setEnabled(False)
         if self.master_device_widget:
             self.master_device_widget.update_device_count()
             if len(self.keylights) == 1:

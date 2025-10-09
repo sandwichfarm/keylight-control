@@ -2,11 +2,11 @@ def get_style() -> str:
     return """
     QMainWindow {
         background-color: #1a1a1a;
-        border-radius: 5px;
     }
 
     QWidget {
         background-color: #1a1a1a;
+        color: #e6e6e6;
     }
 
     QScrollArea {
@@ -165,6 +165,56 @@ def get_style() -> str:
 
     QPushButton#menuButton:hover {
         color: #ffffff;
+    }
+
+    /* Settings button styling */
+    QPushButton#settingsButton {
+        background-color: #3a3a3a;
+        border: 1px solid #555555;
+        border-radius: 12px;
+        color: #dddddd;
+        font-size: 16px;
+        font-weight: bold;
+    }
+
+    QPushButton#settingsButton:hover {
+        background-color: #4a4a4a;
+        border: 1px solid #666666;
+        color: #ffffff;
+    }
+
+    /* Preferences dialog + tabs */
+    QDialog {
+        background-color: #1a1a1a;
+        color: #e6e6e6;
+    }
+
+    QTabWidget::pane {
+        border: 1px solid #3a3a3a;
+    }
+
+    QTabBar::tab {
+        background: #2a2a2a;
+        color: #cccccc;
+        padding: 6px 10px;
+        border: 1px solid #3a3a3a;
+        border-top-left-radius: 6px;
+        border-top-right-radius: 6px;
+        margin-right: 2px;
+    }
+
+    QTabBar::tab:selected {
+        background: #3a3a3a;
+        color: #ffffff;
+        border: 1px solid #555555;
+    }
+
+    QSpinBox, QComboBox {
+        background-color: #2a2a2a;
+        color: #e6e6e6;
+        border: 1px solid #555555;
+        border-radius: 4px;
+        padding: 2px 6px;
     }
 
     QSlider::groove:horizontal {
