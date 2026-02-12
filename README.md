@@ -141,6 +141,48 @@ export PATH="$HOME/.local/bin:$PATH"
 - **Escape**: Minimize to system tray
 - **Shift+Click X**: Force quit (bypass tray)
 
+### Local API
+
+A local API allows external scripts and window-manager keybindings to control your lights. Enabled by default via Unix socket.
+
+**Unix socket** (default, low overhead — ideal for Hyprland/sway/scripts):
+```bash
+# Toggle all lights
+echo '{"command":"lights.toggle"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+
+# List devices
+echo '{"command":"lights.list"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+
+# Set brightness on device 0
+echo '{"command":"lights.set","params":{"id":0,"brightness":75}}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+
+# Hyprland keybinding example
+bind = $mod, L, exec, echo '{"command":"lights.toggle"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+```
+
+**HTTP** (optional, enable in Settings → Advanced):
+```bash
+# Toggle all lights
+curl -X POST http://localhost:27301/api/lights/toggle
+
+# List devices
+curl http://localhost:27301/api/lights
+
+# Set brightness on device 0
+curl -X PUT http://localhost:27301/api/lights/0 -H 'Content-Type: application/json' -d '{"brightness":75}'
+```
+
+**API commands:**
+| Command | Params | Description |
+|---|---|---|
+| `lights.list` | — | List all devices and their state |
+| `lights.toggle` | — | Master toggle (all lights) |
+| `lights.toggle` | `{id}` | Toggle individual device |
+| `lights.get` | `{id}` | Get single device state |
+| `lights.set` | `{id, on, brightness, temperature}` | Set any combination of properties |
+
+Device `id` can be a 0-based index or MAC address.
+
 ## Troubleshooting
 
 ### "No module named 'PySide6'"
