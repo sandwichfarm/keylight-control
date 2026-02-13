@@ -143,45 +143,237 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ### Local API
 
-A local API allows external scripts and window-manager keybindings to control your lights. Enabled by default via Unix socket.
+A local API allows external scripts and window-manager keybindings to control your lights without interacting with the GUI. Two transports are available: a **Unix socket** (enabled by default) and an optional **HTTP server**.
 
-**Unix socket** (default, low overhead — ideal for Hyprland/sway/scripts):
-```bash
-# Toggle all lights
-echo '{"command":"lights.toggle"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+#### Configuration
 
-# List devices
-echo '{"command":"lights.list"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+API settings are under **Settings → Advanced** in the application.
 
-# Set brightness on device 0
-echo '{"command":"lights.set","params":{"id":0,"brightness":75}}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `advanced.api_enabled` | bool | `true` | Master switch — disables all API transports when off |
+| `advanced.api_unix_socket` | bool | `true` | Enable the Unix socket transport |
+| `advanced.api_http` | bool | `false` | Enable the HTTP transport |
+| `advanced.api_http_port` | int | `27301` | Port for the HTTP server |
 
-# Hyprland keybinding example
-bind = $mod, L, exec, echo '{"command":"lights.toggle"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+**Socket path:** `$XDG_RUNTIME_DIR/keylight-control.sock` (fallback: `/tmp/keylight-control.sock`). The socket is created with `0600` permissions (owner-only).
+
+---
+
+#### API Command Reference
+
+| Command | Parameters | Description |
+|---|---|---|
+| `lights.list` | — | List all discovered devices and their current state |
+| `lights.get` | `id` | Get the state of a single device |
+| `lights.set` | `id`, and any of: `on`, `brightness`, `temperature` | Set one or more properties on a device |
+| `lights.toggle` | — | Master toggle (all lights) |
+| `lights.toggle` | `id` | Toggle an individual device on/off |
+
+**Device `id`** — a 0-based integer index (`0`, `1`, …) or a MAC address string (`"AA:BB:CC:DD:EE:FF"`).
+
+**Property constraints:**
+
+| Property | Type | Range | Notes |
+|---|---|---|---|
+| `on` | bool | `true` / `false` | Power state |
+| `brightness` | int | 1 – 100 | Percentage; clamped to range |
+| `temperature` | int | 143 – 344 | Elgato native units (143 ≈ 7000 K, 344 ≈ 2900 K); clamped to range |
+
+---
+
+#### Response Format
+
+Every response contains an `"ok"` field. On success additional data is included; on failure an `"error"` string is returned.
+
+**Success (single device):**
+```json
+{
+  "ok": true,
+  "device": {
+    "index": 0,
+    "name": "Key Light",
+    "ip": "192.168.1.100",
+    "port": 9123,
+    "mac": "AA:BB:CC:DD:EE:FF",
+    "on": true,
+    "brightness": 75,
+    "temperature": 200
+  }
+}
 ```
 
-**HTTP** (optional, enable in Settings → Advanced):
+**Success (device list):**
+```json
+{
+  "ok": true,
+  "devices": [
+    { "index": 0, "name": "Key Light", "ip": "192.168.1.100", "port": 9123, "mac": "AA:BB:CC:DD:EE:FF", "on": true, "brightness": 75, "temperature": 200 },
+    { "index": 1, "name": "Key Light Air", "ip": "192.168.1.101", "port": 9123, "mac": "BB:CC:DD:EE:FF:00", "on": false, "brightness": 50, "temperature": 250 }
+  ]
+}
+```
+
+**Error:**
+```json
+{
+  "ok": false,
+  "error": "Device index 5 out of range (0-1)"
+}
+```
+
+---
+
+#### Unix Socket Examples
+
+The socket speaks newline-delimited JSON. Send a request object and read back one JSON line. [`socat`](https://linux.die.net/man/1/socat) is the easiest way to interact with it from the shell.
+
 ```bash
+SOCK="$XDG_RUNTIME_DIR/keylight-control.sock"
+
+# List all devices
+echo '{"command":"lights.list"}' | socat - UNIX-CONNECT:$SOCK
+
+# Get state of device 0
+echo '{"command":"lights.get","params":{"id":0}}' | socat - UNIX-CONNECT:$SOCK
+
+# Toggle all lights (master toggle)
+echo '{"command":"lights.toggle"}' | socat - UNIX-CONNECT:$SOCK
+
+# Toggle a single light by index
+echo '{"command":"lights.toggle","params":{"id":0}}' | socat - UNIX-CONNECT:$SOCK
+
+# Toggle a single light by MAC address
+echo '{"command":"lights.toggle","params":{"id":"AA:BB:CC:DD:EE:FF"}}' | socat - UNIX-CONNECT:$SOCK
+
+# Set brightness and temperature on device 0
+echo '{"command":"lights.set","params":{"id":0,"brightness":80,"temperature":200}}' | socat - UNIX-CONNECT:$SOCK
+
+# Turn off device 1
+echo '{"command":"lights.set","params":{"id":1,"on":false}}' | socat - UNIX-CONNECT:$SOCK
+```
+
+---
+
+#### HTTP API Reference
+
+Enable the HTTP transport in **Settings → Advanced → Enable HTTP API**. It binds to `127.0.0.1` only.
+
+| Method | Path | API Command | Notes |
+|---|---|---|---|
+| GET | `/api/lights` | `lights.list` | |
+| GET | `/api/lights/{id}` | `lights.get` | |
+| PUT | `/api/lights/{id}` | `lights.set` | Properties in JSON body or query string |
+| POST | `/api/lights/toggle` | `lights.toggle` | Master toggle (all lights) |
+| POST | `/api/lights/{id}/toggle` | `lights.toggle` | Toggle individual device |
+
+Parameters can be passed as a JSON body (`Content-Type: application/json`) or as query-string parameters. Returns `200` on success, `400` on error.
+
+```bash
+# List all devices
+curl http://localhost:27301/api/lights
+
+# Get device 0
+curl http://localhost:27301/api/lights/0
+
 # Toggle all lights
 curl -X POST http://localhost:27301/api/lights/toggle
 
-# List devices
-curl http://localhost:27301/api/lights
+# Toggle device 0
+curl -X POST http://localhost:27301/api/lights/0/toggle
 
-# Set brightness on device 0
-curl -X PUT http://localhost:27301/api/lights/0 -H 'Content-Type: application/json' -d '{"brightness":75}'
+# Set brightness via JSON body
+curl -X PUT http://localhost:27301/api/lights/0 \
+  -H 'Content-Type: application/json' \
+  -d '{"brightness":75}'
+
+# Set brightness and temperature via query string
+curl -X PUT "http://localhost:27301/api/lights/0?brightness=75&temperature=200"
+
+# Turn device 1 off
+curl -X PUT http://localhost:27301/api/lights/1 \
+  -H 'Content-Type: application/json' \
+  -d '{"on":false}'
 ```
 
-**API commands:**
-| Command | Params | Description |
-|---|---|---|
-| `lights.list` | — | List all devices and their state |
-| `lights.toggle` | — | Master toggle (all lights) |
-| `lights.toggle` | `{id}` | Toggle individual device |
-| `lights.get` | `{id}` | Get single device state |
-| `lights.set` | `{id, on, brightness, temperature}` | Set any combination of properties |
+---
 
-Device `id` can be a 0-based index or MAC address.
+#### Shell Helper Function
+
+A small wrapper makes keybindings cleaner:
+
+```bash
+# Add to ~/.bashrc, ~/.zshrc, or a standalone script
+keylight() {
+  local sock="${XDG_RUNTIME_DIR}/keylight-control.sock"
+  local cmd="$1"; shift
+  local params=""
+  if [ $# -gt 0 ]; then
+    params=',"params":{'"$(printf '%s' "$@")"'}'
+  fi
+  echo "{\"command\":\"$cmd\"$params}" | socat - UNIX-CONNECT:"$sock"
+}
+
+# Usage:
+#   keylight lights.toggle
+#   keylight lights.list
+#   keylight lights.set '"id":0,"brightness":80'
+```
+
+---
+
+#### Compositor & Desktop Environment Keybindings
+
+Below are copy-pasteable examples for binding light controls to keyboard shortcuts. All examples use the Unix socket; replace the `socat` command with a `curl` call if you prefer HTTP.
+
+##### Hyprland
+
+```conf
+# ~/.config/hypr/hyprland.conf
+bind = $mod, F5, exec, echo '{"command":"lights.toggle"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+bind = $mod, F6, exec, echo '{"command":"lights.set","params":{"id":0,"brightness":50}}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+bind = $mod, F7, exec, echo '{"command":"lights.set","params":{"id":0,"brightness":100}}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+```
+
+##### sway
+
+```conf
+# ~/.config/sway/config
+bindsym $mod+F5 exec echo '{"command":"lights.toggle"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+bindsym $mod+F6 exec echo '{"command":"lights.set","params":{"id":0,"brightness":50}}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+bindsym $mod+F7 exec echo '{"command":"lights.set","params":{"id":0,"brightness":100}}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+```
+
+##### i3
+
+```conf
+# ~/.config/i3/config
+bindsym $mod+F5 exec echo '{"command":"lights.toggle"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+bindsym $mod+F6 exec echo '{"command":"lights.set","params":{"id":0,"brightness":50}}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+bindsym $mod+F7 exec echo '{"command":"lights.set","params":{"id":0,"brightness":100}}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock
+```
+
+##### KDE Plasma
+
+1. Open **System Settings → Shortcuts → Custom Shortcuts**
+2. Click **Edit → New → Global Shortcut → Command/URL**
+3. Set the **Trigger** to your preferred key combination
+4. Set the **Action** to:
+   ```
+   bash -c 'echo '"'"'{"command":"lights.toggle"}'"'"' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock'
+   ```
+
+##### GNOME
+
+```bash
+# Toggle all lights on Super+F5
+gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/keylight-toggle/']"
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/keylight-toggle/ name 'Toggle Key Lights'
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/keylight-toggle/ binding '<Super>F5'
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/keylight-toggle/ command "bash -c 'echo '\"'\"'{\"command\":\"lights.toggle\"}'\"'\"' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/keylight-control.sock'"
+```
+
+> **Tip:** For multiple GNOME keybindings, append additional paths to the `custom-keybindings` array and repeat the three `set` calls with a different path suffix.
 
 ## Troubleshooting
 
