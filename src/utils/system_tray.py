@@ -93,7 +93,20 @@ def create_tray_icon(window) -> QSystemTrayIcon:
     menu = QMenu()
 
     show_action = QAction("Show", window)
-    show_action.triggered.connect(window.show)
+
+    def _on_show_hide():
+        if window.isVisible():
+            window.hide()
+        else:
+            window.show()
+            window.raise_()
+            window.activateWindow()
+
+    def _update_show_text():
+        show_action.setText("Hide" if window.isVisible() else "Show")
+
+    show_action.triggered.connect(_on_show_hide)
+    menu.aboutToShow.connect(_update_show_text)
     menu.addAction(show_action)
 
     quit_action = QAction("Quit", window)
