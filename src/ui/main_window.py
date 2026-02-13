@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 import socket
 
@@ -26,9 +27,14 @@ from core.models import KeyLight
 from core.discovery import KeyLightDiscovery
 from core.service import KeyLightService
 from core.preferences import PreferencesService
+from core.api import KeyLightAPI
+from core.api_unix import UnixSocketTransport
+from core.api_http import HttpTransport
 from ui.widgets.master_widget import MasterDeviceWidget
 from ui.widgets.keylight_widget import KeyLightWidget
 from ui.preferences.settings_dialog import SettingsDialog
+
+logger = logging.getLogger(__name__)
 
 
 class KeyLightController(QMainWindow):
@@ -60,6 +66,12 @@ class KeyLightController(QMainWindow):
         # Apply preferences on startup and subscribe to changes
         self._apply_all_preferences()
         self.prefs.setting_changed.connect(self._on_setting_changed)
+
+        # Local API
+        self._api = KeyLightAPI(self)
+        self._api_unix: UnixSocketTransport | None = None
+        self._api_http: HttpTransport | None = None
+        self._start_api_transports()
 
     def setup_ui(self):
         """Setup the main UI"""
@@ -631,6 +643,7 @@ class KeyLightController(QMainWindow):
 
     def quit_application(self):
         self.discovery.stop_discovery()
+        self._stop_api_transports()
         from PySide6.QtWidgets import QApplication as _QApp
         _QApp.quit()
 
@@ -677,6 +690,8 @@ class KeyLightController(QMainWindow):
             self.update_master_button_state()
         elif key == "features.enable_discovery":
             self._apply_enable_discovery()
+        elif key.startswith("advanced.api_"):
+            self._restart_api_transports()
 
     def _apply_features_visibility(self):
         show_sync = True
@@ -806,6 +821,39 @@ class KeyLightController(QMainWindow):
                         w.setEnabled(False)
         except Exception:
             pass
+
+    # ---- Local API management ----
+    def _start_api_transports(self):
+        """Start API transports based on current preferences."""
+        try:
+            if not self.prefs.get("advanced.api_enabled", True):
+                return
+            if self.prefs.get("advanced.api_unix_socket", True):
+                self._api_unix = UnixSocketTransport(self._api)
+                asyncio.ensure_future(self._api_unix.start())
+            if self.prefs.get("advanced.api_http", False):
+                port = int(self.prefs.get("advanced.api_http_port", 27301))
+                self._api_http = HttpTransport(self._api, port=port)
+                asyncio.ensure_future(self._api_http.start())
+        except Exception:
+            logger.exception("Failed to start API transports")
+
+    def _stop_api_transports(self):
+        """Stop all running API transports."""
+        try:
+            if self._api_unix:
+                asyncio.ensure_future(self._api_unix.stop())
+                self._api_unix = None
+            if self._api_http:
+                asyncio.ensure_future(self._api_http.stop())
+                self._api_http = None
+        except Exception:
+            logger.exception("Failed to stop API transports")
+
+    def _restart_api_transports(self):
+        """Restart API transports after settings change."""
+        self._stop_api_transports()
+        self._start_api_transports()
 
     def fetch_device_mac(self, device_info):
         asyncio.create_task(self._fetch_and_add_device(device_info))

@@ -201,5 +201,34 @@ class SettingsDialog(QDialog):
         debug_log.setChecked(bool(self.prefs.get("advanced.enable_debug_logging", False)))
         debug_log.toggled.connect(lambda v: self.prefs.set("advanced.enable_debug_logging", bool(v)))
         l.addWidget(debug_log)
+
+        # --- Local API section ---
+        l.addWidget(QLabel(""))  # spacer
+        l.addWidget(QLabel("Local API"))
+
+        api_enabled = QCheckBox("Enable local API")
+        api_enabled.setChecked(bool(self.prefs.get("advanced.api_enabled", True)))
+        api_enabled.toggled.connect(lambda v: self.prefs.set("advanced.api_enabled", bool(v)))
+        l.addWidget(api_enabled)
+
+        api_unix = QCheckBox("Unix socket transport")
+        api_unix.setChecked(bool(self.prefs.get("advanced.api_unix_socket", True)))
+        api_unix.toggled.connect(lambda v: self.prefs.set("advanced.api_unix_socket", bool(v)))
+        l.addWidget(api_unix)
+
+        api_http = QCheckBox("HTTP transport (localhost only)")
+        api_http.setChecked(bool(self.prefs.get("advanced.api_http", False)))
+        api_http.toggled.connect(lambda v: self.prefs.set("advanced.api_http", bool(v)))
+        l.addWidget(api_http)
+
+        port_row = QHBoxLayout()
+        port_row.addWidget(QLabel("HTTP port"))
+        api_port = QSpinBox()
+        api_port.setRange(1024, 65535)
+        api_port.setValue(int(self.prefs.get("advanced.api_http_port", 27301)))
+        api_port.valueChanged.connect(lambda v: self.prefs.set("advanced.api_http_port", int(v)))
+        port_row.addWidget(api_port)
+        l.addLayout(port_row)
+
         l.addStretch(1)
         return w

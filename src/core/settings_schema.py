@@ -41,6 +41,10 @@ class PerformanceSettings:
 class AdvancedSettings:
     master_power_semantics: MasterPowerSemantics = "AnyOn"
     enable_debug_logging: bool = False
+    api_enabled: bool = True
+    api_unix_socket: bool = True
+    api_http: bool = False
+    api_http_port: int = 27301
 
 
 def defaults_dict() -> Dict[str, Any]:
@@ -73,4 +77,8 @@ def defaults_dict() -> Dict[str, Any]:
         # Advanced
         "advanced.master_power_semantics": a.master_power_semantics,
         "advanced.enable_debug_logging": a.enable_debug_logging,
+        "advanced.api_enabled": a.api_enabled,
+        "advanced.api_unix_socket": a.api_unix_socket,
+        "advanced.api_http": a.api_http,
+        "advanced.api_http_port": a.api_http_port,
     }
