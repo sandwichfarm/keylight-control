@@ -71,6 +71,11 @@ class SettingsDialog(QDialog):
     def _build_general_tab(self) -> QWidget:
         w = QWidget()
         l = QVBoxLayout(w)
+        launch_minimized = QCheckBox("Launch minimized to tray")
+        launch_minimized.setChecked(bool(self.prefs.get("general.launch_minimized", False)))
+        launch_minimized.toggled.connect(lambda v: self.prefs.set("general.launch_minimized", bool(v)))
+        l.addWidget(launch_minimized)
+
         hide_on_esc = QCheckBox("Hide window on Escape")
         hide_on_esc.setChecked(bool(self.prefs.get("general.hide_on_esc", True)))
         hide_on_esc.toggled.connect(lambda v: self.prefs.set("general.hide_on_esc", bool(v)))

@@ -53,7 +53,8 @@ def main() -> None:
         asyncio.set_event_loop(loop)
 
     controller = KeyLightController()
-    controller.show()
+    if not controller.prefs.get("general.launch_minimized", False):
+        controller.show()
 
     # Graceful signal handling (SIGINT/SIGTERM) to quit cleanly
     def _handle_signal(signum, _frame):
