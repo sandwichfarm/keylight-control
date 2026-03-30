@@ -43,7 +43,16 @@ That's it! No installation required.
 
 ## Installation Options
 
-### Option 1: Standalone Binary (Easiest)
+### Option 1: Install from AUR (Arch Linux)
+
+For Arch Linux and derivatives, you can easily install the controller from the [AUR](https://aur.archlinux.org/packages/keylight-controller).
+
+```bash
+yay -S keylight-controller
+# or use your favorite AUR helper
+```
+
+### Option 2: Standalone Binary (Easiest)
 ```bash
 # Download from releases page
 wget https://github.com/sandwichfarm/keylight-control/releases/latest/download/keylight-controller-linux-x64.tar.gz
@@ -55,7 +64,7 @@ chmod +x keylight-controller
 sudo mv keylight-controller /usr/local/bin/
 ```
 
-### Option 2: Build from Source
+### Option 3: Build from Source
 
 #### Prerequisites
 - Python 3.8+ (`python3 --version`)
@@ -77,7 +86,7 @@ chmod +x keylight_controller.py
 ./keylight_controller.py
 ```
 
-### Option 3: Using Virtual Environment
+### Option 4: Using Virtual Environment
 ```bash
 # Create virtual environment
 python3 -m venv venv
@@ -90,7 +99,7 @@ pip install -r requirements.txt
 python keylight_controller.py
 ```
 
-### Option 4: System packages (Distribution-specific)
+### Option 5: System packages (Distribution-specific)
 
 For Arch Linux:
 ```bash
