@@ -143,7 +143,7 @@ export PATH="$HOME/.local/bin:$PATH"
 - **Power Button**: Toggle light on/off
 - **Brightness Slider**: Adjust light intensity (1-100%)
 - **Temperature Slider**: Adjust color temperature (2900K-7000K)
-- **System Tray**: Click to show/hide, right-click for menu
+- **System Tray**: Click to show/hide; right-click to toggle all lights, switch all lights on/off, or control individual lights. Each device submenu provides power, brightness presets, and color temperature presets using its saved custom label.
 
 ### Keyboard Shortcuts
 - **Ctrl+Q**: Quit application
