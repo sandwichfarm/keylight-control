@@ -8,11 +8,10 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QPen,
-    QAction,
     QRadialGradient,
     QPainterPath,
 )
-from PySide6.QtCore import Qt, QPointF
+from PySide6.QtCore import Qt, QPointF, QTimer
 
 
 def make_keylight_icon() -> QIcon:
@@ -90,11 +89,22 @@ def create_tray_icon(window) -> QSystemTrayIcon:
     tray = QSystemTrayIcon(icon, window)
     tray.setToolTip("Key Light Control")
 
-    menu = QMenu()
+    menu = QMenu(window)
+    toggle_action = menu.addAction("Toggle all lights")
+    toggle_action.triggered.connect(lambda: window._api.handle_request("lights.toggle", {}))
 
-    show_action = QAction("Show", window)
+    def set_all(on):
+        for index in range(len(window.keylights)):
+            window._api.handle_request("lights.set", {"id": index, "on": on})
 
-    def _on_show_hide():
+    on_action = menu.addAction("All lights on", lambda: set_all(True))
+    off_action = menu.addAction("All lights off", lambda: set_all(False))
+    menu.addSeparator()
+    devices_menu = menu.addMenu("Individual lights")
+    menu.addSeparator()
+    show_action = menu.addAction("Show")
+
+    def show_controls():
         if window.isVisible():
             window.hide()
         else:
@@ -102,19 +112,52 @@ def create_tray_icon(window) -> QSystemTrayIcon:
             window.raise_()
             window.activateWindow()
 
-    def _update_show_text():
+    show_action.triggered.connect(show_controls)
+    menu.addAction("Quit", window.quit_application)
+    # Keep menu actions alive: KDE exports them over D-Bus. Update their
+    # labels/state instead of rebuilding the menu while it may be open.
+    entries = {}
+
+    def refresh():
         show_action.setText("Hide" if window.isVisible() else "Show")
+        available = bool(window.keylights)
+        for action in (toggle_action, on_action, off_action):
+            action.setEnabled(available)
+        devices_menu.setEnabled(available)
+        for index, light in enumerate(window.keylights):
+            if index not in entries:
+                sub = devices_menu.addMenu(light.name)
+                power = sub.addAction("On")
+                power.setCheckable(True)
+                power.triggered.connect(
+                    lambda checked, i=index: window._api.handle_request("lights.set", {"id": i, "on": checked})
+                )
+                brightness = sub.addMenu("Brightness")
+                for percent in (10, 25, 50, 75, 100):
+                    brightness.addAction(f"{percent}%",
+                        lambda checked=False, i=index, value=percent: window._api.handle_request("lights.set", {"id": i, "brightness": value}))
+                temperature = sub.addMenu("Color temperature")
+                for kelvin in (2900, 3200, 4000, 5000, 5600, 6500, 7000):
+                    temperature.addAction(f"{kelvin} K",
+                        lambda checked=False, i=index, value=kelvin: window._api.handle_request("lights.set", {"id": i, "temperature": round(1000000 / value)}))
+                entries[index] = (sub, power, brightness, temperature)
+            sub, power, brightness, temperature = entries[index]
+            name = window.device_config.get_label(light.mac_address, light.name)
+            sub.setTitle(name.replace("&", "&&"))
+            power.setChecked(light.on)
+            brightness.setTitle(f"Brightness ({light.brightness}%)")
+            temperature.setTitle(f"Color temperature ({round(1000000 / light.temperature)} K)")
+        count_on = sum(light.on for light in window.keylights)
+        tray.setToolTip(f"Key Lights: {count_on} of {len(window.keylights)} on")
 
-    show_action.triggered.connect(_on_show_hide)
-    menu.aboutToShow.connect(_update_show_text)
-    menu.addAction(show_action)
-
-    quit_action = QAction("Quit", window)
-    quit_action.triggered.connect(window.quit_application)
-    menu.addAction(quit_action)
-
+    # Plasma may use its exported menu without emitting QMenu.aboutToShow.
+    # Refresh cached device state as well; this does not issue network reads.
+    timer = QTimer(tray)
+    timer.timeout.connect(refresh)
+    timer.start(500)
+    menu.aboutToShow.connect(refresh)
+    refresh()
     tray.setContextMenu(menu)
     tray.activated.connect(window.on_tray_activated)
     tray.show()
-
     return tray
