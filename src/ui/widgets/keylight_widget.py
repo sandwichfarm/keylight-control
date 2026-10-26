@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QLabel,
     QMenu,
+    QMessageBox,
 )
 from PySide6.QtGui import QAction, QCursor
 
@@ -323,23 +324,23 @@ class KeyLightWidget(QFrame):
         menu.exec_(QCursor.pos())
 
     def rename_device(self, controller) -> None:
-        original_name = controller.device_config.get_label(self.keylight.mac_address, self.keylight.name)
-        controller.show_blur_overlay()
-        try:
-            controller.adjust_window_size_for_dialog()
-            dialog = RenameDeviceDialog(original_name, self.keylight.name, controller)
-            if dialog.exec():
-                new_name = dialog.get_name()
-                if new_name and new_name != original_name:
-                    success = controller.device_config.set_label(
-                        self.keylight.mac_address, original_name, new_name, self.keylight.ip
-                    )
-                    if success:
-                        self.name_label.setText(new_name)
-                    else:
-                        print(f"Failed to save custom label for {original_name}")
-        finally:
-            controller.cleanup_after_dialog()
+        current_name = controller.device_config.get_label(self.keylight.mac_address, self.keylight.name)
+        dialog = RenameDeviceDialog(current_name, self.keylight.name, controller)
+        self._rename_dialog = dialog
+
+        def save_name():
+            new_name = dialog.get_name()
+            if new_name and new_name != current_name:
+                if controller.device_config.set_label(
+                    self.keylight.mac_address, self.keylight.name, new_name, self.keylight.ip
+                ):
+                    self.name_label.setText(new_name)
+                else:
+                    QMessageBox.warning(controller, "Rename Device", "Could not save the device name.")
+
+        dialog.accepted.connect(save_name)
+        dialog.finished.connect(dialog.deleteLater)
+        dialog.open()
 
     def reset_label(self, controller) -> None:
         original_name = self.keylight.name
